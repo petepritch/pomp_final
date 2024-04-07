@@ -1,0 +1,46 @@
+---
+title: "Draft"
+author: "Pete, Sizhuang, and Heyuan"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    theme: cosmo
+    toc: yes
+    toc_float:
+      collapsed: true
+---
+
+![Female Willow Ptarmigan captured by [Bryce W. Robinson](https://ornithologi.com/2015/06/30/in-context-mid-summer-willow-ptarmigan-behavior-and-appearance/).](./assets/ptarmigan.jpg)
+
+# Introduction
+
+## Related Work
+
+## Data
+
+# Data Analysis
+
+```{r libraries}
+library(readxl)
+library(ggplot2)
+library(knitr)
+```
+
+
+```{r data_table}
+data <- read_excel("./data/bird_data.xlsx")
+
+knitr::kable(data[1:5, 1:5], caption = "Data")
+```
+
+```{r}
+
+```
+
+
+
+# Methods
+
+# Results 
+
+# Conclusion
