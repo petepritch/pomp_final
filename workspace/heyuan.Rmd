@@ -1,0 +1,135 @@
+
+```{r}
+library(tidyverse)
+library(tseries)
+```
+
+
+
+#### read in the data & data description
+```{r}
+data_path <- '/Users/ruojunliu/Desktop/STATS 531 - Time Series/pomp_final/data/data.txt'
+df <- read.table(data_path, header = TRUE, sep = "\t", na.strings = "NA", dec = ".", strip.white = TRUE)
+head(df)
+
+```
+
+142 years (1872-2013) of willow ptarmigan hunting records in southeastern Norway
+
+CPUE: the number of birds shot per hunter per day, as the primary metric for assessing population changes.
+
+NAO: A positive NAO index favors mild winters in the U.S. East. Negative values favor stronger cold-air outbreaks and increased storminess in the eastern U.S.
+
+temp.PREINC: temperature, pre-incubation, 5/1 - 6/2
+temp.INC: temperature, incubation, 6/3 - 6/24
+temp.BROOD: temperature, brooding & rearing, 6/25 - 7/15
+temp.HATCH: temperature, mean hatching date, 7/21 - 7/27
+prefix prec.: precipitation
+
+opening data hunt(julian day): the starting day of hunting season is named as Julian Day, which is varied across 142 years. It is mainly in mid to late August up to the 1920's and 10th/15th September in later years. 
+
+
+# Data Analysis
+
+#### Trend Analysis
+Temporal Patterns: CPUE showed significant declines from early records to recent years, with notable shifts in population cycles and their amplitude.
+
+Impact of Alternative Prey: The availability of rodents, which serve as alternative prey for predators that also hunt ptarmigan, was strongly linked to fluctuations in ptarmigan numbers. Years with high rodent populations typically saw higher CPUE for ptarmigan, suggesting lower predatory pressure on them.
+
+#### Correlation
+For the ACF plot, the initial 40 lags show a strong correlation with past values, diminishing quickly after first 5 lags. It suggests $q = 5$, $q = 40$ or any value smaller than 40 appropriate for MA(q) component. For the PACF plot, partial correlation dies out quickly after 5 lags. It would be appropriate to select $p = 0$ or $p = 5$ for AR(p) component.
+
+Given the long-range significance in the ACF, I may be dealing with a non-stationary series that needs differencing. Also this plot with a flip to negative autocorrelations and a cyclical pattern that declines over time is a characteristic sign of seasonality in my data. However, STL or classical decomposition fails because time series has no or less than 2 periods, indicating the non-existence of seasonality. So the repeated short-term cycle in 5 lags could be explained by the partial correlation.  
+
+
+```{r, error=TRUE}
+start_year <- min(df$year)
+end_year <- max(df$year)
+frequency <- 1  
+ts_cpue <- ts(df$log.CPUE, start=start_year, end=end_year, frequency=frequency)
+
+# Apply STL decomposition
+ts_components <- stl(ts_cpue, s.window = "periodic")
+plot(ts_components)
+```
+
+
+#### Stationary Check
+ARMA(p,q) is performed only if time series data is stationary. So, I will do the stationarity check by ADF.
+
+```{r}
+# Kwiatkowski-Phillips-Schmidt-Shin (KPSS) test
+kpss_result <- kpss.test(ts_cpue, null = "Level")
+print(kpss_result)
+```
+
+From ADF test, p-value is estimated as 0.01, smaller than 0.05. We have enough evidence to reject the null hypothesis that the time series is non-stationary. 
+
+KPSS with p-value = 0.01 suggests that the log CPUE times series data is non-stationary. This means I can't fit the data with ARMA(p,q) without differencing to achieve stationarity.
+
+
+#### Differencing
+```{r}
+# Differencing the time series once
+ts_diff <- diff(ts_cpue, differences = 1)
+print(kpss.test(ts_diff,null = "Level"))
+```
+
+KPSS with p-value = 0.1 suggests that the first-order differenced times series data is stationary. This means I can fit this differenced data with ARMA(p,q).
+
+
+
+# Methods
+
+## ARMA
+From ADF test, p-value is estimated as 0.01, smaller than 0.05. We have enough evidence to reject the null hypothesis that the time series is non-stationary. KPSS also support the same conclusion that this times series data is stationary. Thus, we could conclude that CPUE on log scale is stationary. This means I can fit the data with ARMA(p,q) without the need to difference or other ways of data transformation to achieve stationarity.
+
+```{r}
+
+aic_table <- function(data,P,Q){
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      table[p+1,q+1] <- arima(data,order=c(p,0,q))$aic
+    }
+  }
+  dimnames(table) <- list(paste("AR",0:P, sep=""),
+    paste("MA",0:Q,sep=""))
+  table
+}
+
+bird_aic_table <- aic_table(ts_diff,5,10)
+require(knitr)
+kable(bird_aic_table,digits=2)
+
+```
+
+The smaller AIC, the better the model to fit the data. Thus, ARMA(0,5) with the lowest AIC value of 204.48 is the best model. 
+
+
+```{r}
+aic_table <- function(data,P,Q){
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      table[p+1,q+1] <- arima(data,order=c(p,1,q))$aic
+    }
+  }
+  dimnames(table) <- list(paste("AR",0:P, sep=""),
+    paste("MA",0:Q,sep=""))
+  table
+}
+
+bird_aic_table <- aic_table(ts_cpue,5,10)
+require(knitr)
+kable(bird_aic_table,digits=2)
+```
+
+ARIMA(0,1,5) achieves the same result for original log CPUE data.
+
+
+## POMP
+
+
+
+
