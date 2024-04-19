@@ -5,6 +5,7 @@ date: "`r Sys.Date()`"
 csl: https://raw.githubusercontent.com/citation-style-language/styles/master/cell-numeric.csl
 output: 
   bookdown::html_document2:
+    code_folding: hide
     theme: cosmo
     toc: yes
     toc_float:
@@ -23,9 +24,29 @@ This report extends previous research investigating the long-term population dec
 
 - Grouse species are of the most studied
 
-- In this report, we analyzed 142 years of data to investigate whether the population growth of a declining alternative prey species, the willow ptarmigan, is related to an interaction between red foxes and their main prey, small rodents.
+- In this report, we analyze 142 years of data to investigate whether the population growth of a declining alternative prey species, the willow ptarmigan, is related to an interaction between red foxes and their main prey, small rodents.
+
+Two types of questions we can ask.
+
+- Scientific goals: Which explanations are most favored by the data? Which kinds of data are most informative?
+- Applied goals: how to design ecological or epidemiological intervention? How to make accurate forecasts?
+
+
+This report seeks to answer two scientific questions. First, between alternative prey hypothesis and the role of climate change, which explanation is most favored by the data? Secondly, which kind of data is more informative?
+
 
 ## Related Work
+
+In ecological studies, researching predator-prey dynamics, especially within the context of the alternative prey hypothesis, offers profound understanding into ecosystem complexities. Focusing on ptarmigans in Norway, a number of studies have attempted to model the interplay between ptarmigans as prey and their predators, including gyrfalcons and foxes. Notably, research by Aanes et al. (2002) highlighted the significant impact of predation pressure on ptarmigan populations, emphasizing the need to understand predator-prey dynamics for effective conservation strategies.
+
+## Objectives
+
+Our research objectives are as follow:
+
+- 
+- There has been a lack in application of the Partially Observed Markov Process (POMP) framework to ecological research questions.
+
+The remainder of the report is structured as follows. We briefly introduce and describe our data set and variables of interest. Following that, a short exploration of data trend, correlation, and association is is given. Next, we build a baseline ARMA process model to serve as a measurement for our more complex proposals. We then introduce the pomp framework and present our model along with a section on model diagnostics. We conclude with the results, a discussion, and a summary with suggestions of future extensions. 
 
 ## Data
 
@@ -39,8 +60,10 @@ rodent years were extracted from four sources: 1871-1949 (Wildhagen 1952), 1932-
 (Myrberget 1982a), 1971-1979 (Christiansen 1983), 1981-1985 (Frafjord 1988), 1986- 1989
 (Selås et al. 2013), and 1990-2013 (Framstad 2017). Note that 1980 is missing as we were
 not able to find an estimate for this year.
+- **NAO**: The mean North Atlantic Oscillation index for the months May through
+July.
 
-# Data Analysis
+
 
 ```{r libraries, echo=FALSE, message=FALSE}
 library(readxl)
@@ -56,21 +79,24 @@ library(pomp)
 ```{r data_table, echo=FALSE}
 data <- read_excel("./data/bird_data.xlsx")
 data |>
-  rename(peak_rodent_year = "peak rodent year") -> data
+  rename(peak_rodent_year = "peak rodent year") |>
+  rename(NAO = "NAO May_Jun_Jul")-> data
 
-knitr::kable(data[1:5, 1:6], caption = "Data")
+knitr::kable(data[1:5, 1:7], caption = "Data")
 ```
+
+
+# Data Analysis
+
+## Trend Analysis {.tabset}
+
+### Time Plots
 
 ```{r, echo=FALSE, message=FALSE}
 # Most basic bubble plot
 p1 <- ggplot(data, aes(x=year, y=CPUE)) +
   geom_line(color="steelblue") + 
   geom_point() + 
-  geom_rect(
-    data = subset(data, peak_rodent_year == 'yes'),
-            aes(xmin = year - 0.5, xmax = year + 0.5, ymin = -Inf, ymax = Inf),
-            fill = "blue", alpha = 0.3
-    ) + 
   theme_light() +
   xlab("") + 
   stat_smooth(
@@ -79,6 +105,16 @@ p1 <- ggplot(data, aes(x=year, y=CPUE)) +
   )
 
 p2 <- ggplot(data, aes(x=year, y=log.CPUE)) + 
+  geom_line(color="steelblue") + 
+  geom_point() + 
+  theme_light() + 
+  xlab("Year") + 
+  stat_smooth(
+    color = "#FC4E07",
+    method = "loess"
+  )
+
+p3 <- ggplot(data, aes(x=year, y=log.CPUE)) + 
   geom_line(color="steelblue") + 
   geom_point() + 
   geom_rect(
@@ -93,26 +129,47 @@ p2 <- ggplot(data, aes(x=year, y=log.CPUE)) +
     method = "loess"
   )
 
+
 plot_grid(
-  p1, p2,
+  p1, p2, p3,
   labels = "AUTO", 
   ncol = 1
 )
 ```
 
-Looking at both *CPUE* and *log.CPUE* in [figure], it's evident that ptarmigan populations has steadily decreased over the 142 year-long period. The blue shaded regions highlight years when peak rodent year is "yes." Notice how both plots exhibit peaks in the shaded regions and troughs otherwise, which is exactly what we expected to see from the alternative prey hypothesis. It's also worth noting that this trend is far less apparent beyond the early 1900s. 
+### Box Plot
+
+```{r, boxplot, echo=FALSE}
+ggplot(data, aes(x = peak_rodent_year, y = log.CPUE)) + 
+  
+  geom_boxplot() + 
+  theme_light() + 
+  xlab("Peak Rodent Year")
+```
+
+## {-}
+
+Looking at both *CPUE* and *log.CPUE* in [figure], it's evident that ptarmigan populations has steadily decreased over the 142 year-long period. The blue shaded regions in plot **C** highlight years when peak rodent year is equal to "yes." Notice how both plots exhibit peaks in the shaded regions and troughs otherwise, which is exactly what we expected to see from the alternative prey hypothesis. It's also worth noting that this trend is far less apparent beyond the early 1900s. 
+
+Figure [] depicts the ACF plot of *log.CPUE* at 100 lags. The plot reinforces what we already know - the time series is not stationary, or that future values of the time series are correlated with past values. More specifically, the initial 40 lags show strong correlation with the strongest being the first 5. The PACF plot in figure [], the partial correlation dies out after 5 lags. For an ARMA model, it may be appropriate to select an $AR(p=5)$ component. 
+
+Given the long-range significance in the ACF plot and obvious non-stationarity, differencing the series may be necessary to fit a simple time series model to the data. Moreover, the ACF appears to be approaching a seasonal behavior, however we cannot apply STL or classical decomposition procedures as our sample of data has less than 2 periods. The repeated short-term cycle in 5 lags could be explained by the partial correlation. 
 
 In accordance with the previous study, our analysis will use *log.CPUE* to reduce heteroscedasticity.
 
+## Correlation {.tabset}
 
+### ACF
 ```{r ACF, echo=FALSE}
 acf(data$log.CPUE, lag = 100, main = "ACF log.CPUE")
 ```
 
+### PACF
+
 ```{r PACF, echo=FALSE}
 pacf(data$log.CPUE, lag = 100, main = "PACF log.CPUE")
 ```
-
+## {-}
 --------
 
 # Methods
@@ -144,14 +201,104 @@ kable(bird_aic_table,digits=2)
 
 ## Partially Observed Markov Process
 
-Partially observed Markov process models, also known as state-space models, hidden Markov models, and stochastic dynamical system models "consist of an unobserved Markov state process, connected to the data via an explicit model of the observation process." The former is referred to as the *latent process model* and the latter as the *measurement model.*
+```{r, echo=FALSE}
+# This code snippet is to add a new column that mutates peak_rodent_year into 
+# binary values for the POMP model.
+data |>
+  mutate(rodent_binary = ifelse(peak_rodent_year == 'yes', 1, 0)) -> data
+```
+
+
+Partially observed Markov process models, also known as state-space models, hidden Markov models, and stochastic dynamical system models "consist of an unobserved Markov state process, connected to the data via an explicit model of the observation process." The former is referred to as the *latent process model* and the latter as the *measurement model.* A simple visual representation of the process is depicted in figure [].
+
+We propose modeling the pomp framework using a variation of the Lotka–Volterra equations [cite]. The Lotka-Voltera equations, also referred to as the predator-prey equations, are a pair of first order nonlinear differential equations. They are frequently used to describe the dynamics of biological systems in which two species interact, one as a predator and the other as prey. Our analysis focuses on a slightly different approach that introduces the idea of an *alternative prey.* The alternative prey hypothesis supposes that predators supported by a primary species will shift to consume alternative prey during a decrease in primary prey abundance.
+
+The measurement model $Y(t)$ is our ptarmigan count proxy, *log.CPUE*, $y(t) =Negative\ Binomial(mean=\rho\beta_t, \sigma)$, and the process model $X(t)$ includes predator and alternative prey (rodent) count. 
 
 ![Conditional independence graph of POMP from A. King's Notes](./assets/state_space.png)
 
-### Ricker Model
+### Model Components
 
-```{r}
+- `rprocess`: a draw from $f_{X_n|X_{n-1}}(x_n|x_{n-1};\theta)$
+- `dprocess`: evaluation of $f_{X_n|X_{n-1}}(x_n|x_{n-1};\theta)$
+- `rmeasure`: a draw from $f_{Y_n|X_{n}}(y_n|x_{n};\theta)$
+- `dmeasure`: evaluation of $f_{Y_n|X_{n}}(y_n|x_{n};\theta)$
+- `rinit`:a draw from $f_{X_0}(x_0;\theta)$
 
+**Covariates**
+
+- $R(t)=$ peak rodent year, from data
+
+
+
+$$Y_t \sim NB(\rho B_t, \sigma),$$
+where parameter $\rho$ is proportional to capturing effort, e.g., the number of hunters.  
+
+$$F_{t+dt}=\delta(t)F_tB_t-\theta F_t$$ 
+where
+
+$$
+\delta (t) = \left\{\begin{array}{ll}
+\delta_1 & : R(t)=0\\
+\psi \delta_1 & :  o.w.
+\end{array}
+\right.
+$$
+
+$\delta(t)F_t\beta_t$ is the rate of the poisson step. 
+
+$$B_{t+dt} = \alpha B_t - \beta(R_t)B_tF_t,$$
+
+where
+
+$$
+\beta (R_t) = \left\{\begin{array}{ll}
+\beta_1 & : R(t)=0\\
+\gamma \beta_1 & :  o.w.
+\end{array}
+\right.
+$$
+
+We use a binomial approximation with transition probabilities
+
+```{r, eval=FALSE}
+Csnippet("
+  double dNf  = rbinom(F, 1-exp);
+  double dF_p = rbinom(F, 1-exp(rho_t * beta_t * dt));
+  double dF_m = rbinom(F, 1-exp(theta*dt));
+  
+  B = 
+  F += dF_p - dF_m; 
+  
+  
+") -> step
+
+Csnippet("
+  B = 
+  F = 
+") -> rinit
+
+Csnippet("
+
+") -> rproc
+
+Csnippet("
+  count = dnbinom(rho*B, sigma)
+") -> rmeas
+
+Cnsippet("
+  
+") -> dmeas
+
+mod <- pomp(rprocess = euler(step, delta.t =),
+            times = "year", t0 = 1872,
+            rinit = rinit,
+            rprocess = eurler(step, delta.t=),
+            rmeasure = rmeas, 
+            dmeasure = , 
+            paramnames = c("rho", "theta", "delta"),
+  
+)
 ```
 
 
@@ -166,6 +313,14 @@ Partially observed Markov process models, also known as state-space models, hidd
 --------
 
 # Conclusion
+
+--------
+
+# Contribution
+
+- Pete: Proposed the research topic and found data set. Wrote introduction, related, work, exploratory data analysis sections. 
+- Heyuan: ?
+- Sizhuang: 
 
 --------
 
