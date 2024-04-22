@@ -11,7 +11,7 @@
 
 <meta name="author" content="Pete, Sizhuang, and Heyuan" />
 
-<meta name="date" content="2024-04-19" />
+<meta name="date" content="2024-04-21" />
 
 <title>Investigating the alternative prey hypothesis with the POMP framework</title>
 
@@ -1574,7 +1574,7 @@ border-radius: 0px;
 
 <h1 class="title toc-ignore">Investigating the alternative prey hypothesis with the POMP framework</h1>
 <h4 class="author">Pete, Sizhuang, and Heyuan</h4>
-<h4 class="date">2024-04-19</h4>
+<h4 class="date">2024-04-21</h4>
 
 </div>
 
@@ -1844,20 +1844,20 @@ where</p>
 \]</span></p>
 <p>We use a binomial approximation with transition probabilities</p>
 <pre class="r"><code>Csnippet(&quot;
-  double dNf  = rbinom(F, 1-exp)
+  double dNf  = rbinom(F, 1-exp);
   double dF_p = rbinom(F, 1-exp(rho_t * beta_t * dt));
   double dF_m = rbinom(F, 1-exp(theta*dt));
+  
+  B = 
+  F += dF_p - dF_m; 
   
   
 &quot;) -&gt; step
 
 Csnippet(&quot;
-  
+  B = 
+  F = 
 &quot;) -&gt; rinit
-
-Csnippet(&quot;
-
-&quot;) -&gt; rproc
 
 Csnippet(&quot;
   count = dnbinom(rho*B, sigma)
@@ -1867,16 +1867,18 @@ Cnsippet(&quot;
   
 &quot;) -&gt; dmeas
 
-mod &lt;- pomp(rprocess = euler(step, delta.t =),
+mod &lt;- pomp(rprocess = euler(step, delta.t = 1/52),
             times = &quot;year&quot;, t0 = 1872,
-            rprocess = rproc,
             rinit = rinit,
-            rprocess = eurler(,delta.t=),
+            rprocess = euler(step, delta.t=),
             rmeasure = rmeas, 
             dmeasure = , 
             paramnames = c(&quot;rho&quot;, &quot;theta&quot;, &quot;delta&quot;),
   
 )</code></pre>
+<ul>
+<li><code>rinit</code>: simulator for the initial-state distiburution, i.e., the distribution of the latent state at time <span class="math inline">\(t_0\)</span></li>
+</ul>
 <hr />
 </div>
 </div>

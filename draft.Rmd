@@ -279,10 +279,6 @@ Csnippet("
 ") -> rinit
 
 Csnippet("
-
-") -> rproc
-
-Csnippet("
   count = dnbinom(rho*B, sigma)
 ") -> rmeas
 
@@ -290,10 +286,10 @@ Cnsippet("
   
 ") -> dmeas
 
-mod <- pomp(rprocess = euler(step, delta.t =),
+mod <- pomp(rprocess = euler(step, delta.t = 1/52),
             times = "year", t0 = 1872,
             rinit = rinit,
-            rprocess = eurler(step, delta.t=),
+            rprocess = euler(step, delta.t=),
             rmeasure = rmeas, 
             dmeasure = , 
             paramnames = c("rho", "theta", "delta"),
@@ -301,6 +297,8 @@ mod <- pomp(rprocess = euler(step, delta.t =),
 )
 ```
 
+
+- `rinit`: simulator for the initial-state distiburution, i.e., the distribution of the latent state at time $t_0$
 
 --------
 
