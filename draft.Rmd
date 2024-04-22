@@ -65,14 +65,14 @@ July.
 
 
 
-```{r libraries, echo=FALSE, message=FALSE}
+```{r libraries, echo=FALSE, message=FALSE, warning=FALSE}
 library(readxl)
 library(ggplot2)
 library(knitr)
 library(forecast)
 library(dplyr)
 library(cowplot)
-library(pomp)
+#library(pomp)
 ```
 
 
@@ -80,9 +80,10 @@ library(pomp)
 data <- read_excel("./data/bird_data.xlsx")
 data |>
   rename(peak_rodent_year = "peak rodent year") |>
-  rename(NAO = "NAO May_Jun_Jul")-> data
+  rename(NAO = "NAO May_Jun_Jul") |>
+  select(c(year, CPUE, peak_rodent_year, NAO)) -> data
 
-knitr::kable(data[1:5, 1:7], caption = "Data")
+knitr::kable(data, caption = "Data")
 ```
 
 
