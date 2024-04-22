@@ -4,6 +4,7 @@ library(tidyverse)
 library(tseries)
 #install.packages("ggfortify")
 library(ggfortify)
+library(pomp)
 ```
 
 
@@ -159,26 +160,232 @@ For the ACF plot of the residuals, all autocorrelations are within the confidenc
 
 
 
-## POMP 1
+
+
+## POMP 3
+
+Y(t): bird count, $y_t = NB(mean = \rho B_t, \sigma)$, $B_t$ is bird population size at time t
+X(t): unobserved state process, red foxes, Bird, Peak Rodent Year, temperature, precipitation, NAO index 
+
+Reference: Lotka-Volterra predator-prey model for the state process: $$X_{t+dt} = \beta X_t - \mu X_t$$
+
+natural born - number of birds eaten by foxes: 
+$$B_{t+dt} = \alpha B_t - \beta(R_t) B_{t}F_{t}$$
+
+where, $$\beta(R_t) = \beta if R(t)=0$$ or 
+$$ \beta(R_t) = \gamma \beta, \gamma > 1$$ , rodent number affect the rate of fox eating birds, 
+$\beta(R_t)$ can be re-written as $$\beta(R_t) =  \gamma^R \beta$$, where R = 0 or 1
+
+
+Growth Rate - Death Rate of Foxes: 
+$$ F_{t+dt} = \delta(t) F_t B^*_t - \theta(t) F_t$$
+
+where, $$\delta(t) = \delta_1 if R(t) = 0, or, \phi \delta_1$$ , $\phi<1$ and whether it is in rodent peak year affect the number of birds and the number of foxes.
+
+$\delta(t)$ can be re-written as $$\delta(t) = \phi^R \delta_1$$, where R = 0 or 1
+
+
+$\theta(t)$ could include the temperature, NAO about how does it affect the death rate of Foxes.
+
+
+
+
+
+
+first, let dt=1 year
+then, dt = less than 1 year, maybe 1 month, bird keeps as 100, foxes=10, 15, 17, 15 for each dt until reaching 1 year. 
+then include bird in X(t), lecture 16
+
+
+
+
+
+
+
+another way: bird is not in X(t)
+
+$$B_{t+dt} = \alpha B^*_{t+dt} - \beta(R_t) B_{t} F_{t}$$
+
+just do the fox equation, no bird equation
+
+
 
 
 ```{r}
-install.packages("pomp")
-library(pomp)
+# compute the average temperature and preciptation. 
+data_frame <- df[,c(1,3,6,7,8:17)]
+data_frame$Temp <- rowMeans(data_frame[,c(5:10)], na.rm = TRUE) 
+data_frame$Precip <- rowMeans(data_frame[,c(11:14)], na.rm = TRUE) 
+data_frame <- data_frame[,c(1,2,3,4,15,16)]
+names(data_frame) <- c('year', 'CUPE', 'R', 'NAO', 'Temp', 'Precip')
+data_frame$R <- ifelse(data_frame$R == "yes", 1, 0)
+data_frame <- transform(data_frame, year = as.numeric(year))  # Ensure 'year' is numeric
+
 ```
 
-To create a POMP for CPUE, I need to define the state process that reflects the underlying dynamics of the species population and the observation process that relates the state to the CPUE measurements.
 
 
 
 
+Euler Approximation of the predator population at time $t+ \delta t$...
+
+$$F_{t+\delta t} = F_t + \delta(t) F_t B_t \delta t - \theta F_t \delta t$$
+$$F_{t+\delta t} = F_t + (\phi^R \delta_1 F_t B_t - \theta F_t) \delta t$$
+
+$\delta(t) F_t B_t \delta t$ is the expected number of new predators arising from the Poisson process with rate $\delta(t) F_t B_t$;
+$- \theta F_t \delta t$ is the deterministic decrease in predators due to natural death over the time step $\delta t$
+
+
+$$B_{t+ \delta t} = B_t + \alpha B_t \delta t - \beta(R_t) B_t F_t\delta t$$
+$$B_{t+ \delta t} = B_t + (\alpha B_t - \gamma^R \beta B_t F_t) \delta t$$
+
+```{r, warning=FALSE}
+meas <- dplyr::select(data_frame, year, reports=CUPE, R) 
 
 
 
+sir_step<- Csnippet("
+  double rateBin, rateBout, rateFin, rateFout; 
+  
+  rateBin = alpha * B * dt;
+  rateBout = pow(gamma, R) * beta_1 * B * Fox * dt;
+  rateFin = pow(psi, R) * delta_1 * Fox * B * dt;
+  rateFout = theta * Fox * dt;
+  
+  // double dF = rbinom(Fox, 1 - exp(-rateF));
+  double dFin = rbinom(Fox, 1 - exp(-rateFin));
+  double dFout = rbinom(Fox, 1 - exp(-rateFout));
+  
+  double dBin = rbinom(B, 1 - exp(-rateBin));
+  double dBout = rbinom(B, 1 - exp(-rateBout));
+
+  Fox += dFin - dFout;  
+  B += dBin - dBout;
+  B = fmax(B, 0.0); 
+  Fox = fmax(Fox, 0.0);
+  // Rprintf(\"B = %f\\n\\n \", B);
+ 
+")
+
+
+# dmeasure: Define the measurement model
+sir_dmeas <- Csnippet("
+  if (give_log) {
+    if (B == 0 & reports != 0) {
+      lik = -100000;
+    } else {
+      // Rprintf(\"rho * B = %f\\n \", rho * B);
+      // Rprintf(\"reports = %f\\n\\n \", reports);
+      lik = dnbinom_mu(reports, k, rho * B, give_log);
+    }
+  } else {
+    lik = dnbinom_mu(reports, k, rho * B, give_log);
+  }
+")
+
+# rmeasure: 
+sir_rmeas <- Csnippet("
+  reports = rnbinom_mu(k, rho * B);
+")
+## size =  number of successes until the experiment is stopped; success rate / hunting rate: 
+
+# initialize:
+sir_rinit <- Csnippet("
+  Fox = nearbyint(F_0);
+  B = nearbyint(B_0);
+")
+
+
+# Define parameters and initial states
+params <- c(alpha = 0.5, beta_1 = 0.0001, gamma = 1, delta_1 = 0.01, psi = 3, theta = 0.1, rho = 0.01, k = 20, F_0 = 90, B_0 = 1000)
+
+my_covars <- covariate_table(meas |> dplyr::select(R, year) |> as.data.frame(), times = 'year', order = 'constant')
+
+# create a pomp object
+pomp(data = meas |> dplyr::select(-R) |> as.data.frame(),
+     rprocess=euler(sir_step,delta.t=1/12), times='year', t0=1871,
+    rinit=sir_rinit,
+    rmeasure=sir_rmeas,
+    dmeasure=sir_dmeas,
+    statenames=c("Fox","B"),
+    paramnames=c("alpha", "gamma", "delta_1", 'beta_1', "psi", "theta", "rho" ,'k', 'F_0', 'B_0'),
+    covar = my_covars,
+    partrans = parameter_trans(log = c('alpha', 'gamma', 'delta_1', 'beta_1', 'psi', 'theta', 'rho', 'k', 'F_0', 'B_0'))
+  ) -> measSIR
 
 
 
+measSIR |>
+  pfilter(Np=5, params = params) -> pf
 
+mif2(
+  measSIR, 
+  Nmif = 10, 
+  Np = 2000,
+  cooling.fraction.50 = 0.5, 
+  rw.sd = rw_sd(
+    alpha = 0.02, beta_1 = 0.02, gamma = 0.00, delta_1 = 0.02, psi = 0.02, rho = 0.02, k = 0.02, F_0 = ivp(0.1), B_0 = ivp(0.1), theta = 0.02
+  ),
+  params = params
+) -> mif_out
+
+```
+
+
+
+```{r}
+statenames <- c('logF', 'logB')
+paramnames <- c('a', 'b', 'c', 'gamma', 'alpha', 'Beta', 'sigmaF', 'sigmaB',
+                'logF_0', 'logB_0', 'logRho', 'sigma_obs')
+obs_names <- c('logCPUE')
+# logF_0 = 0 normalizing to assume unit initial population
+# sigmaF roughly the noise in a year
+param_guess <- c(
+  logF_0 = 0,
+  logB_0 = 0,
+  a = 1,
+  b = 2,
+  c = 1,
+  alpha = 1,
+  Beta = 1,
+  gamma = 0.5,
+  sigmaF = 0.1,
+  sigmaB = 0.1,
+  logRho = 3,
+  sigma_obs = 0.1
+)
+Csnippet('
+  double dwB, dwF;
+  dwF = rgammawn(sigmaF, dt);
+  dwB = rgammawn(sigmaB, dt);
+  logF += (b*R + c*exp(logB)*(1-gamma*R)-a)*dwF;
+  logB += (alpha - Beta*exp(logF)*(1-gamma*R))*dwB;
+') -> rproc
+Csnippet('
+  logF = logF_0;
+  logB = logB_0;
+') -> rinit
+Csnippet('
+  log.CPUE = rnorm(logB + logrho, signma_obs);
+') -> rmeas
+Csnippet('
+  lik = dnorm(logCPUE, logB + logrho, sigma_obs, give_log);
+') -> dmeas
+
+my_covars <- covariate_table(meas |> dplyr::select(R, year) |> as.data.frame(), times = 'year', order = 'constant')
+
+
+pomp(data = data_frame |> dplyr::select(-R),rprocess=euler(rproc,delta.t=1/12),
+     times = 'year', t0 = 1871,
+    rinit=rinit,
+    # rmeasure=rmeas,
+    # dmeasure=dmeas,
+    statenames=statenames,
+    paramnames=paramnames,
+    covar = my_covars
+  ) -> measSIR
+
+```
 
 
 
