@@ -368,13 +368,18 @@ mif2(
 ) -> mif2_out
 ```
 
+```{r}
+
+```
+
+
 
 ```{r}
 freeze(
   runif_design(
     lower = c(alpha = 0, Beta = 0, gamma = 0, a = 0, b = 0, c = 0,
               sigma_obs = 0, logF_0 = ivp(0.1), logB_0 = ivp(0.1),
-              sigmaF = 0, sigmaB = 0.02, logRho = 0)
+              sigmaF = 0, sigmaB = 0.02, logRho = 0),
     upper = c(alpha = 0, Beta = 0, gamma = 0, a = 0, b = 0, c = 0,
               sigma_obs = 0, logF_0 = ivp(0.1), logB_0 = ivp(0.1),
               sigmaF = 0, sigmaB = 0.02, logRho = 0)
