@@ -1,0 +1,529 @@
+---
+title: "Investigating the alternative prey hypothesis with the POMP framework"
+author: "Pete, Sizhuang, and Heyuan"
+date: "`r Sys.Date()`"
+csl: https://raw.githubusercontent.com/citation-style-language/styles/master/cell-numeric.csl
+bibliography: references.bib 
+output: 
+  bookdown::html_document2:
+    code_folding: hide
+    theme: cosmo
+    toc: yes
+    toc_float:
+      collapsed: true
+---
+
+![Female Willow Ptarmigan captured by [Bryce W. Robinson](https://ornithologi.com/2015/06/30/in-context-mid-summer-willow-ptarmigan-behavior-and-appearance/).](./assets/ptarmigan.jpg)
+
+# Introduction
+
+Studying population dynamics is essential for understanding the complex interactions between species and their environment. By modeling population dynamics, researchers can gain an understanding of how animals respond to environmental changes and activities. This understanding is vital for conservation efforts as it aids in identifying endangered species and devising strategies to safeguard biodiversity. Furthermore, animal populations can act as reservoirs for infectious diseases, impacting both human and animal health. By comprehensively understanding population movements, scientists can predict outbreaks, discern transmission patterns, and enhance disease control and prevention measures.
+
+This report extends research by Hjeljord and Loe, who explain the dwindling numbers of willow ptarmigan *Lapagos lapagos* in Northeastern Scandinavia (). Although not in immediate danger, the willow ptarmigan faces threats from habitat loss, climate change, and hunting and trapping. Hjeljord and Loe postulate that, along with climate, a long-term dampening of the amplitude in small rodents and an increase in red fox numbers, have prevented willow ptarmigan populations from reaching their peaks seen a hundred years ago (). Their analysis implements linear models with a count proxy as a function of time to estimate linear change and wavelet analysis to detect cyclic periods. This report’s aim is to further Hjelford and Loe’s work by capturing the stochastic population dynamics and the role of alternative prey using the partially observed markov process (POMP) framework
+
+## Related Work
+
+Surprisingly, grouse, the family of birds which willow ptarmigan belong to, are of the most studied bird species in the world. Thus, an abundance of scientific research has been carried out to shed light on the decline in its population. Pedersen el al., @pedersen found that intensified forestry practices have significantly reduced suitable breeding habitat. Additionally, agricultural expansion has led to the conversion of tundra and heathland habitats, further diminishing ptarmigan populations [@henden]. Climate change exacerbates these effects by altering snow cover patterns, impacting the ptarmigans' ability to camouflage and increasing predation risk. Research by Tottrup et al., @tottrup highlighted that warmer temperatures and reduced snow cover are leading to increased predation pressure on ptarmigans in Scandinavia. Furthermore, hunting pressure has also played a role in the decline of ptarmigan populations. Studies by Hebbelstrup @hebbelstrup and Storass @storass documented the impact of hunting on ptarmigan populations in Norway and Sweden, respectively.  Breisjøberget el al., found that red foxes negatively affect ptarmigan when small rodent abundance is low, which is in accordance with the alternative prey hypothesis. Despite there being a plethora of work conducted in this area, none have applied 
+
+The remainder of the report is structured as follows. We briefly introduce and describe our data set and variables of interest. Followed by a short exploration of trend, correlation, and association. Next, we build a baseline ARMA process model to serve as a measurement for our more complex proposals. We then introduce the pomp framework and present our model along with a section on model diagnostics. We conclude with the results, a discussion, and a summary with suggestions of future extensions. 
+
+## Data
+
+Our data includes 142 observations of CPUE from 1872 to 2012. The harvest data was recorded by hunters in the Southeastern mountain regions of Norway. The data is provided by the authors of the study and is hosted by Dryad [here](). A description of the dataset provided by the authors is given below: 
+
+- **year**: Self explanatory
+- **log.CPUE**: Logarithm transformation of CPUE, catch per unit effort, expressed as a number of birds shot per hunter per year.
+- **peak_rodent_year**: Peak rodent year is scored as “yes”, otherwise “no”. Occurrence of peak
+rodent years were extracted from four sources: 1871-1949 (Wildhagen 1952), 1932-1971
+(Myrberget 1982a), 1971-1979 (Christiansen 1983), 1981-1985 (Frafjord 1988), 1986- 1989
+(Selås et al. 2013), and 1990-2013 (Framstad 2017). 
+
+
+```{r libraries, echo=FALSE, message=FALSE, warning=FALSE}
+library(readxl)
+library(ggplot2)
+library(knitr)
+library(forecast)
+library(dplyr)
+library(cowplot)
+library(pomp)
+library(foreach)
+library(doFuture)
+plan(multisession)
+library(doParallel)
+library(doRNG)
+```
+
+
+```{r data_table, echo=FALSE}
+df <- read_excel("/Users/ruojunliu/Desktop/STATS 531 - Time Series/pomp_final/data/bird_data.xlsx")
+df |>
+  rename(R = "peak rodent year") |>
+  rename(NAO = "NAO May_Jun_Jul") |>
+  rename(logCPUE = "log.CPUE") |>
+  mutate(R = ifelse(R == "no", 0, 1)) -> data 
+
+subset <- c("year", "logCPUE", "R")
+
+knitr::kable(head(data[subset], 10), caption = "Data")
+```
+
+
+# Data Analysis
+
+## Trend Analysis {.tabset}
+
+### Time Plots
+
+```{r, echo=FALSE, message=FALSE}
+# Most basic bubble plot
+p1 <- ggplot(data, aes(x=year, y=CPUE)) +
+  geom_line(color="steelblue") + 
+  geom_point() + 
+  theme_light() +
+  xlab("") + 
+  stat_smooth(
+    color = "#FC4E07",
+    method = "loess"
+  )
+
+p2 <- ggplot(data, aes(x=year, y=logCPUE)) + 
+  geom_line(color="steelblue") + 
+  geom_point() + 
+  theme_light() + 
+  xlab("Year") + 
+  stat_smooth(
+    color = "#FC4E07",
+    method = "loess"
+  )
+
+p3 <- ggplot(data, aes(x=year, y=logCPUE)) + 
+  geom_line(color="steelblue") + 
+  geom_point() + 
+  geom_rect(
+    data = subset(data, R == 1),
+            aes(xmin = year - 0.5, xmax = year + 0.5, ymin = -Inf, ymax = Inf),
+            fill = "blue", alpha = 0.3
+    ) + 
+  theme_light() + 
+  xlab("Year") + 
+  stat_smooth(
+    color = "#FC4E07",
+    method = "loess"
+  )
+
+
+plot_grid(
+  p1, p2, p3,
+  labels = "AUTO", 
+  ncol = 1
+)
+```
+
+### Box Plot
+
+```{r, boxplot, echo=FALSE}
+ggplot(data, aes(x = factor(R), y = logCPUE, group = factor(R))) + 
+  geom_boxplot() + 
+  theme_light() + 
+  xlab("Peak Rodent Year") +
+  scale_x_discrete(labels = c("no" = "0", "yes" = "1"))
+```
+
+## {-}
+
+Looking at both *CPUE* and *log.CPUE* plot above, it's evident that ptarmigan populations has steadily decreased over the 142 year-long period. The blue shaded regions in plot **C** highlight years when peak rodent year is equal to "yes." Notice how both plots exhibit peaks in the shaded regions and troughs otherwise, which is exactly what we expected to see from the alternative prey hypothesis. It's also worth noting that this trend is far less apparent beyond the early 1900s. 
+
+In accordance with the previous study, our analysis will use *log.CPUE* to reduce heteroscedasticity.
+
+## Correlation {.tabset}
+
+### ACF
+```{r ACF, echo=FALSE}
+acf(data$logCPUE, lag = 100, main = "ACF log.CPUE")
+```
+
+### PACF
+
+```{r PACF, echo=FALSE}
+pacf(data$logCPUE, lag = 100, main = "PACF log.CPUE")
+```
+
+## {-}
+
+Above figure depicts the ACF plot of *log.CPUE* at 100 lags. The plot reinforces what we already know - the time series is not stationary, or that future values of the time series are correlated with past values. More specifically, the initial 40 lags show strong correlation with the strongest being the first 5. The PACF plot above, the partial correlation dies out after 5 lags. For an ARMA model, it may be appropriate to select an $AR(p=5)$ component. 
+
+Given the long-range significance in the ACF plot and obvious non-stationarity, differencing the series may be necessary to fit a simple time series model to the data. Moreover, the ACF appears to be approaching a seasonal behavior, however we cannot apply STL or classical decomposition procedures as our sample of data has less than 2 periods, which indicates the non-existence of seasonal pattern. The repeated short-term cycle in 5 lags could be explained by the partial correlation. 
+
+--------
+
+# Methods
+
+## ARMA Baseline
+
+We will start off by fitting a simple ARMA model with parameters chosen using the algorithmic approach, grid search. This simple model will serve as a reference against which the performance of the more advanced POMP model is measured. In theory, the ARMA model will serve as a yardstick for managing expectations. Of the models shown in (table #), we select the one with the Akaike’s information criterion (AIC). AIC is essentially “minus twice the maximized log likelihood plus twice the number of parameters [cite],” and is defined by:
+
+$$AIC=-2\times\ell(\theta^*)+2D$$
+
+ARMA model can't be performed on the non-stationary time series data. The KPSS test is implemented for stationarity check, though ACF plot shows an abvious non-stationarity.  
+```{r stationary, echo=FALSE}
+# Kwiatkowski-Phillips-Schmidt-Shin (KPSS) test
+kpss_result <- kpss.test(ts_cpue, null = "Level")
+print(kpss_result)
+
+# Differencing the time series once
+start_year <- min(data$year)
+end_year <- max(data$year)
+frequency <- 1  
+ts_cpue <- ts(data$logCPUE, start=start_year, end=end_year, frequency=frequency)
+ts_diff <- diff(ts_cpue, differences = 1)
+print(kpss.test(ts_diff,null = "Level"))
+```
+
+
+KPSS with p-value = 0.01 suggests that the average daily hunting of birds(CPUE) in log scale is non-stationary. However, first-order difference on this time series data is stationary, proved by the p-value larger than $\alpha=0.05$ from KPSS test. Then the following ARMA(p,q) model will be run on such differenced data.
+
+
+```{r grid_search, echo=FALSE, warning=FALSE}
+aic_table <- function(data,P,Q){
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      table[p+1,q+1] <- arima(data,order=c(p,0,q))$aic
+    }
+  }
+  dimnames(table) <- list(paste("AR",0:P, sep=""),
+    paste("MA",0:Q,sep=""))
+  table
+}
+
+bird_aic_table <- aic_table(data$logCPUE,4,5)
+require(knitr)
+kable(bird_aic_table,digits=2)
+```
+
+
+The smaller AIC, the better the model to fit the data. Thus, ARMA(1,5) with the lowest AIC value of 217.08 is the best model to fit the differenced data. Or in other words, ARIMA(1,1,5) is the best model to fit average daily hunting of birds(CPUE) in log scale. 
+
+## Partially Observed Markov Process
+ 
+Partially observed Markov process models, also known as state-space models, hidden Markov models, and stochastic dynamical system models "consist of an unobserved Markov state process, connected to the data via an explicit model of the observation process." The former is referred to as the *latent process model* and the latter as the *measurement model.* A simple visual representation of the process is depicted in figure [].
+
+We propose modeling the pomp framework using a variation of the Lotka–Volterra equations [cite]. The Lotka-Voltera equations, also referred to as the predator-prey equations, are a pair of first order nonlinear differential equations. They are frequently used to describe the dynamics of biological systems in which two species interact, one as a predator and the other as prey. Our analysis focuses on a slightly different approach that introduces the idea of an *alternative prey.* The alternative prey hypothesis supposes that predators supported by a primary species will shift to consume alternative prey during a decrease in primary prey abundance.
+
+The measurement model $Y(t)$ is our ptarmigan count proxy, *log.CPUE*, $y(t) =Negative\ Binomial(mean=\rho\beta_t, \sigma)$, and the process model $X(t)$ includes predator (fox), preferred prey(rodent) and alternative prey (bird) count. 
+
+![Conditional independence graph of POMP from A. King's Notes](./assets/state_space.png)
+
+### Model Components
+
+- `rprocess`: a draw from $f_{X_n|X_{n-1}}(x_n|x_{n-1};\theta)$
+- `dprocess`: evaluation of $f_{X_n|X_{n-1}}(x_n|x_{n-1};\theta)$
+- `rmeasure`: a draw from $f_{Y_n|X_{n}}(y_n|x_{n};\theta)$
+- `dmeasure`: evaluation of $f_{Y_n|X_{n}}(y_n|x_{n};\theta)$
+- `rinit`:a draw from $f_{X_0}(x_0;\theta)$
+
+**Covariates**
+
+- $Z(t)= R(t)$ peak rodent yea
+
+$$Y_n = N$$
+
+
+
+$$Y_t \sim NB(\rho B_t, \sigma),$$
+where parameter $\rho$ is proportional to capturing effort, e.g., the number of hunters.  
+
+$$F_{t+dt}=\delta(t)F_tB_t-\theta F_t$$ 
+where
+
+$$
+\delta (t) = \left\{\begin{array}{ll}
+\delta_1 & : R(t)=0\\
+\psi \delta_1 & :  o.w.
+\end{array}
+\right.
+$$
+
+$\delta(t)F_t\beta_t$ is the rate of the poisson step. 
+
+$$B_{t+dt} = \alpha B_t - \beta(R_t)B_tF_t,$$
+
+where
+
+$$
+\beta (R_t) = \left\{\begin{array}{ll}
+\beta_1 & : R(t)=0\\
+\gamma \beta_1 & :  o.w.
+\end{array}
+\right.
+$$
+
+We use a binomial approximation with transition probabilities
+
+
+### Local Search 
+
+```{r}
+statenames <- c("logF", "logB")
+paramnames <- c("a", "b", "c", "gamma", "alpha", "Beta", "sigmaF", "sigmaB", 
+                "logF_0", "logB_0", "logRho", "sigma_obs")
+obs_names <- c("logCPUE")
+# logF_0 = 0 normalizing to assume unit initial population
+# sigmaF roughly the noise in a year
+```
+
+
+```{r, echo=FALSE, eval=FALSE}
+data_path <- '/Users/ruojunliu/Desktop/STATS 531 - Time Series/pomp_final/data/data.txt'
+data <- read.table(data_path, header = TRUE, sep = "\t", na.strings = "NA", dec = ".", strip.white = TRUE)
+
+data |>
+  rename(R = "peak.rodent.year") |>
+  rename(NAO = "NAO.May_Jun_Jul") |>
+  rename(logCPUE = "log.CPUE") |>
+  mutate(R = ifelse(R == "no", 0, 1)) -> data 
+
+subset <- c("year", "logCPUE", "R")
+
+bird <- data[subset]
+head(bird)
+```
+
+
+```{r}
+Csnippet("
+  double dwF, dwB;
+
+  dwF = rgammawn(sigmaF, dt);
+  dwB = rgammawn(sigmaB, dt);
+  
+  logF += (b*R + c*exp(logB)*(1-gamma*R)-a)*dwF;
+  logB += (alpha - Beta*exp(logF)*(1-gamma*R))*dwB;
+") -> step
+
+Csnippet("
+  logF = logF_0;
+  logB = logB_0;
+") -> rinit
+
+Csnippet("
+  logCPUE = rnorm(logB - logRho, sigma_obs);
+") -> rmeas
+
+Csnippet("
+  lik = dnorm(logCPUE, logB - logRho, sigma_obs, give_log);
+") -> dmeas
+```
+
+
+```{r}
+bird1 <- bird |> 
+  dplyr::select(-R)
+
+bird1 |>
+  pomp(
+    times="year", 
+    t0=1871,
+    rprocess=euler(step, delta.t=1/52),
+    rinit=rinit,
+    rmeasure=rmeas,
+    dmeasure=dmeas,
+    statenames=statenames,
+    paramnames=paramnames,
+    obs_names <- c("logCPUE"),
+    covar = covariate_table(
+      bird |> dplyr::select(year, R) |> 
+        dplyr::bind_rows(c("year" = 1871, R = 0)) |> 
+        dplyr::arrange(year), 
+      times = 'year',
+      order = "constant"
+    ),
+    partrans = parameter_trans(
+      log = c('sigmaF', 'sigmaB', 'alpha', 'sigma_obs', 'a', 'gamma', 'Beta', 'b',
+              'c', 'logF_0', 'logB_0', 'logRho')
+    )
+    # covarnames <- c("R")
+  ) -> mod
+```
+
+
+
+Fisrt, we used a particle filter applied to a model over time and then assessed the performance. We gave a guess of parameter values with the following: $log(F_0) = 1, log(B_0) = 1, a = 1, b = 2, c = 1, \alpha = 1, \beta = 1, \gamma = 0.5, \sigma_F = 0.1,  \sigma_B = 0.1, log(\rho) = 3, \sigma_{obs} = 0.1$
+
+```{r}
+param_guess <- c(
+  logF_0 = 1, 
+  logB_0 = 1,
+  a = 1,
+  b = 2, 
+  c = 1,
+  alpha = 1, 
+  Beta = 1,
+  gamma = 0.5,
+  sigmaF = 0.1, 
+  sigmaB = 0.1, 
+  logRho = 3, 
+  sigma_obs = 0.1
+)
+
+mod |>
+  pfilter(Np=50, params =param_guess) -> pf
+plot(pf)
+```
+
+The effective sample size (ESS) in the second panel displays a presence of occasional spikes interspersed with predominantly low values. It suggests that only a few samples are providing meaningful information, which lead to a less robust and a less reliable estimate. The third panel shows the conditional log-likelihood over time which is a measure of how well the model with its current parameters. The log-likelihood appears to be fluctuating and showing some periods of higher values interspersed with periods of significant decline, indicating varying model performance over time. 
+
+Thus, our initial guess of parameter values is poor and we will do a local search of parameters for a more stablized model performance. 
+
+A single execution of the mif2 function applied to mod provides a snapshot of the model's behavior under a specific set of initial conditions.
+```{r}
+## local search using if2
+## a single execution of the mif2 function applied to mod
+mif2(
+  mod, 
+  Np = 1000, 
+  Nmif = 50, 
+  rw.sd = rw_sd(
+    alpha = 0.02, Beta = 0.02, gamma = 0.02, 
+    a = 0.02, b = 0.02, c = 0.02, 
+    sigma_obs = 0.02, logF_0 = ivp(0.1), logB_0 = ivp(0.1), 
+    sigmaF = 0.02, sigmaB = 0.02, logRho = 0.02
+  ),
+  cooling.fraction.50 = 0.5,
+  params = param_guess
+) -> mif2_out
+
+plot(mif2_out)
+```
+
+
+
+We used a foreach loop which iterates 20 times, each iteration of the loop applies the mif2 function to our model. This is a good way to explore the variability in outcomes due to initial conditions and other stochastic elements of the modeling process as well as control the robustness.
+
+```{r}
+foreach(i=1:20,.combine=c,
+    .options.future=list(seed=482947940)
+  ) %dofuture% {
+    mod |>
+      mif2(
+        Np=1000, Nmif=50,
+        cooling.fraction.50=0.5,
+        rw.sd = rw_sd(
+           alpha = 0.02, Beta = 0.02, gamma = 0.02, 
+           a = 0.02, b = 0.02, c = 0.02, 
+          sigma_obs = 0.02, logF_0 = ivp(0.1), logB_0 = ivp(0.1), 
+         sigmaF = 0.02, sigmaB = 0.02, logRho = 0.02
+        ),
+        partrans = parameter_trans(
+             log = c('sigmaF', 'sigmaB', 'alpha', 'sigma_obs', 'a', 'gamma', 'Beta', 'b',
+              'c', 'logF_0', 'logB_0', 'logRho')),
+        paramnames=c("a", "b", "c", "gamma", "alpha", "Beta", "sigmaF", "sigmaB", 
+                "logF_0", "logB_0", "logRho", "sigma_obs"),
+        params = param_guess
+      )
+  } -> mifs_local
+
+mifs_local |>
+  traces() |>
+  melt() |>
+  ggplot(aes(x=iteration,y=value,group=.L1,color=factor(.L1)))+
+  geom_line()+
+  guides(color="none")+
+  facet_wrap(~name,scales="free_y")
+```
+
+
+
+
+```{r}
+foreach(mf=mifs_local,.combine=rbind,
+  .options.future=list(seed=900242057)
+) %dofuture% {
+   evals <- replicate(10, logLik(pfilter(mf,Np=500))) 
+   ll <- logmeanexp(evals,se=TRUE) 
+   mf |> coef() |> bind_rows() |>
+   bind_cols(loglik=ll[1],loglik.se=ll[2]) } -> results
+
+pairs(~loglik+a+alpha+b+Beta+c+gamma+logB_0+logF_0+logRho+sigmaB+sigmaF,data=results,pch=16)
+```
+
+
+
+
+### Global Search
+
+```{r}
+
+guesses <- freeze(
+  runif_design(
+    lower = c(alpha = 0, Beta = 0, gamma = 0, a = 0, b = 0, c = 0,
+              sigma_obs = 0, logF_0 = ivp(0.1), logB_0 = ivp(0.1),
+              sigmaF = 0, sigmaB = 0.02, logRho = 0),
+    upper = c(alpha = 0, Beta = 0, gamma = 0, a = 0, b = 0, c = 0,
+              sigma_obs = 0, logF_0 = ivp(0.1), logB_0 = ivp(0.1),
+              sigmaF = 0, sigmaB = 0.02, logRho = 0),
+  nseq=400 )
+)
+
+```
+
+
+```{r}
+set.seed(2062379496)
+
+runif_design(
+  lower = c(alpha = 0, Beta = 0, gamma = 0, a = 7, b = 2, c = 0.5,
+              sigma_obs = 0, logF_0 = 0.4, logB_0 = 1.6,
+              sigmaF = 0, sigmaB = 0.02, logRho = 0.3),
+    upper = c(alpha = 0.1, Beta = 0.1, gamma = 0.1, a = 8, b = 3, c = 1,
+              sigma_obs = 1, logF_0 = 0.5, logB_0 = 1.7,
+              sigmaF = 0.1, sigmaB = 0.04, logRho = 0.5),
+    nseq=400
+) -> guesses
+
+
+mf1 <- mifs_local[[1]]
+fixed_params <- coef(mif2_out) 
+
+foreach(guess=iter(guesses,"row"), .combine=rbind,
+      .options.future=list(seed=1270401374)
+    ) %dofuture% {
+      mf1 |>
+        mif2(params=c(guess,fixed_params)) |>
+        mif2(Nmif=1000) -> mf
+      replicate(
+        10,
+        mf |> pfilter(Np=500) |> logLik()
+      ) |>
+        logmeanexp(se=TRUE) -> ll
+      mf |> coef() |> bind_rows() |>
+        bind_cols(loglik=ll[1],loglik.se=ll[2])
+    } -> results
+    
+filter(is.finite(loglik)) -> results
+
+```
+
+
+## Diagnostics
+
+--------
+
+# Results 
+
+--------
+
+# Conclusion
+
+--------
+
+# Contribution
+
+- Pete: Proposed the research topic and found data set. Wrote introduction, related, work, exploratory data analysis sections. 
+- Heyuan: ?
+- Sizhuang: 
+
+--------
+
+# References
