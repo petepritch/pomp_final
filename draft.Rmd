@@ -3,6 +3,7 @@ title: "Investigating the alternative prey hypothesis with the POMP framework"
 author: "Pete, Sizhuang, and Heyuan"
 date: "`r Sys.Date()`"
 csl: https://raw.githubusercontent.com/citation-style-language/styles/master/cell-numeric.csl
+bibliography: references.bib 
 output: 
   bookdown::html_document2:
     code_folding: hide
@@ -18,11 +19,11 @@ output:
 
 Studying population dynamics is essential for understanding the complex interactions between species and their environment. By modeling population dynamics, researchers can gain an understanding of how animals respond to environmental changes and activities. This understanding is vital for conservation efforts as it aids in identifying endangered species and devising strategies to safeguard biodiversity. Furthermore, animal populations can act as reservoirs for infectious diseases, impacting both human and animal health. By comprehensively understanding population movements, scientists can predict outbreaks, discern transmission patterns, and enhance disease control and prevention measures.
 
-This report extends research by Hjeljord and Loe, who explain the dwindling numbers of willow ptarmigan Lapagog lapagos in Northeastern Scandinavia (). Although not in immediate danger, the willow ptarmigan faces threats from habitat loss, climate change, and hunting and trapping. Hjeljord and Loe postulate that, along with climate, a long-term dampening of the amplitude in small rodents and an increase in red fox numbers, have prevented willow ptarmigan populations from reaching their peaks seen a hundred years ago (). Their analysis implements linear models with a count proxy as a function of time to estimate linear change and wavelet analysis to detect cyclic periods. This report’s aim is to further Hjelford and Loe’s work by capturing the stochastic population dynamics and the role of alternative prey using the partially observed markov process (POMP) framework
+This report extends research by Hjeljord and Loe, who explain the dwindling numbers of willow ptarmigan *Lapagos lapagos* in Northeastern Scandinavia (). Although not in immediate danger, the willow ptarmigan faces threats from habitat loss, climate change, and hunting and trapping. Hjeljord and Loe postulate that, along with climate, a long-term dampening of the amplitude in small rodents and an increase in red fox numbers, have prevented willow ptarmigan populations from reaching their peaks seen a hundred years ago (). Their analysis implements linear models with a count proxy as a function of time to estimate linear change and wavelet analysis to detect cyclic periods. This report’s aim is to further Hjelford and Loe’s work by capturing the stochastic population dynamics and the role of alternative prey using the partially observed markov process (POMP) framework
 
 ## Related Work
 
-Surprisingly, grouse, the family of birds which willow ptarmigan belong to, are of the most studied bird species in the world. Thus, an abundance of scientific research has been carried out to shed light on the decline in its population. @pedersen found that intensified forestry practices have significantly reduced suitable breeding habitat. Additionally, agricultural expansion has led to the conversion of tundra and heathland habitats, further diminishing ptarmigan populations [@henden]. Climate change exacerbates these effects by altering snow cover patterns, impacting the ptarmigans' ability to camouflage and increasing predation risk. Research by @tottrup highlighted that warmer temperatures and reduced snow cover are leading to increased predation pressure on ptarmigans in Scandinavia. Furthermore, hunting pressure has also played a role in the decline of ptarmigan populations. Studies by @hebbelstrup and @storass documented the impact of hunting on ptarmigan populations in Norway and Sweden, respectively.  Breisjøberget el al., found that red foxes negatively affect ptarmigan when small rodent abundance is low, which is in accordance with the alternative prey hypothesis.
+Surprisingly, grouse, the family of birds which willow ptarmigan belong to, are of the most studied bird species in the world. Thus, an abundance of scientific research has been carried out to shed light on the decline in its population. Pedersen el al., @pedersen found that intensified forestry practices have significantly reduced suitable breeding habitat. Additionally, agricultural expansion has led to the conversion of tundra and heathland habitats, further diminishing ptarmigan populations [@henden]. Climate change exacerbates these effects by altering snow cover patterns, impacting the ptarmigans' ability to camouflage and increasing predation risk. Research by Tottrup et al., @tottrup highlighted that warmer temperatures and reduced snow cover are leading to increased predation pressure on ptarmigans in Scandinavia. Furthermore, hunting pressure has also played a role in the decline of ptarmigan populations. Studies by Hebbelstrup @hebbelstrup and Storass @storass documented the impact of hunting on ptarmigan populations in Norway and Sweden, respectively.  Breisjøberget el al., found that red foxes negatively affect ptarmigan when small rodent abundance is low, which is in accordance with the alternative prey hypothesis. Despite there being a plethora of work conducted in this area, none have applied 
 
 The remainder of the report is structured as follows. We briefly introduce and describe our data set and variables of interest. Followed by a short exploration of trend, correlation, and association. Next, we build a baseline ARMA process model to serve as a measurement for our more complex proposals. We then introduce the pomp framework and present our model along with a section on model diagnostics. We conclude with the results, a discussion, and a summary with suggestions of future extensions. 
 
@@ -45,13 +46,14 @@ library(knitr)
 library(forecast)
 library(dplyr)
 library(cowplot)
+library(doParallel)
 library(pomp)
 ```
 
 
 ```{r data_table, echo=FALSE}
-data <- read_excel("./data/bird_data.xlsx")
-data |>
+df <- read_excel("./data/bird_data.xlsx")
+df |>
   rename(R = "peak rodent year") |>
   rename(NAO = "NAO May_Jun_Jul") |>
   rename(logCPUE = "log.CPUE") |>
@@ -59,7 +61,7 @@ data |>
 
 subset <- c("year", "logCPUE", "R")
 
-knitr::kable(data[subset], caption = "Data")
+knitr::kable(head(data[subset], 10), caption = "Data")
 ```
 
 
@@ -81,7 +83,7 @@ p1 <- ggplot(data, aes(x=year, y=CPUE)) +
     method = "loess"
   )
 
-p2 <- ggplot(data, aes(x=year, y=log.CPUE)) + 
+p2 <- ggplot(data, aes(x=year, y=logCPUE)) + 
   geom_line(color="steelblue") + 
   geom_point() + 
   theme_light() + 
@@ -91,11 +93,11 @@ p2 <- ggplot(data, aes(x=year, y=log.CPUE)) +
     method = "loess"
   )
 
-p3 <- ggplot(data, aes(x=year, y=log.CPUE)) + 
+p3 <- ggplot(data, aes(x=year, y=logCPUE)) + 
   geom_line(color="steelblue") + 
   geom_point() + 
   geom_rect(
-    data = subset(data, peak_rodent_year == 1),
+    data = subset(data, R == 1),
             aes(xmin = year - 0.5, xmax = year + 0.5, ymin = -Inf, ymax = Inf),
             fill = "blue", alpha = 0.3
     ) + 
@@ -117,11 +119,11 @@ plot_grid(
 ### Box Plot
 
 ```{r, boxplot, echo=FALSE}
-ggplot(data, aes(x = peak_rodent_year, y = log.CPUE)) + 
-  
+ggplot(data, aes(x = factor(R), y = logCPUE, group = factor(R))) + 
   geom_boxplot() + 
   theme_light() + 
-  xlab("Peak Rodent Year")
+  xlab("Peak Rodent Year") +
+  scale_x_discrete(labels = c("no" = "0", "yes" = "1"))
 ```
 
 ## {-}
@@ -138,13 +140,13 @@ In accordance with the previous study, our analysis will use *log.CPUE* to reduc
 
 ### ACF
 ```{r ACF, echo=FALSE}
-acf(data$log.CPUE, lag = 100, main = "ACF log.CPUE")
+acf(data$logCPUE, lag = 100, main = "ACF log.CPUE")
 ```
 
 ### PACF
 
 ```{r PACF, echo=FALSE}
-pacf(data$log.CPUE, lag = 100, main = "PACF log.CPUE")
+pacf(data$logCPUE, lag = 100, main = "PACF log.CPUE")
 ```
 ## {-}
 --------
@@ -170,7 +172,7 @@ aic_table <- function(data,P,Q){
   table
 }
 
-bird_aic_table <- aic_table(data$log.CPUE,4,5)
+bird_aic_table <- aic_table(data$logCPUE,4,5)
 require(knitr)
 kable(bird_aic_table,digits=2)
 ```
@@ -232,28 +234,43 @@ $$
 
 We use a binomial approximation with transition probabilities
 
+
+```{r, echo=FALSE, eval=FALSE}
+df |>
+  rename(R = "peak rodent year") |>
+  rename(NAO = "NAO May_Jun_Jul") |>
+  rename(logCPUE = "log.CPUE") |>
+  mutate(R = ifelse(R == "no", 0, 1))  |>
+  rename(reports = "CPUE") |>
+  select(c("year", "reports", "R")) -> bird
+```
+
+```{r echo=FALSE, eval=FALSE}
+birdMod |>
+  pfilter(Np=5, params = params) -> pf
+
+mif2(
+  measSIR, 
+  Nmif = 10, 
+  Np = 2000,
+  cooling.fraction.50 = 0.5, 
+  rw.sd = rw_sd(
+    alpha = 0.02, beta_1 = 0.02, gamma = 0.00, delta_1 = 0.02, psi = 0.02, rho = 0.02, k = 0.02, F_0 = ivp(0.1), B_0 = ivp(0.1), theta = 0.02
+  ),
+  params = params
+) -> mif_out
+```
+
+
+### Local Search 
+
 ```{r}
 statenames <- c("logF", "logB")
 paramnames <- c("a", "b", "c", "gamma", "alpha", "Beta", "sigmaF", "sigmaB", 
                 "logF_0", "logB_0", "logRho", "sigma_obs")
 obs_names <- c("logCPUE")
-covarnames <- c("R")
 # logF_0 = 0 normalizing to assume unit initial population
 # sigmaF roughly the noise in a year
-param_guess <- c(
-  logF_0 = 0, 
-  logB_0 = 0,
-  a = 1,
-  b = 2, 
-  c = 1,
-  alpha = 1, 
-  Beta = 1,
-  gamma = 0.5,
-  sigmaF = 0.1, 
-  sigmaB = 0.1, 
-  logRho = 3, 
-  sigma_obs = 0.1
-)
 ```
 
 ```{r}
@@ -261,9 +278,11 @@ bird <- data[subset]
 head(bird)
 ```
 
-```{r, eval=FALSE}
+
+
+```{r}
 Csnippet("
-  double dwW, dwB;
+  double dwF, dwB;
 
   dwF = rgammawn(sigmaF, dt);
   dwB = rgammawn(sigmaB, dt);
@@ -278,30 +297,94 @@ Csnippet("
 ") -> rinit
 
 Csnippet("
-  log.CPUE = rnorm(logB + logrho, signma_obs)
+  logCPUE = rnorm(logB - logRho, sigma_obs);
 ") -> rmeas
 
 Csnippet("
-  lik = dnorm(logCPUE, lobB + logrho, sigma_obs.give_log)
+  lik = dnorm(logCPUE, logB - logRho, sigma_obs, give_log);
 ") -> dmeas
+```
 
+```{r}
+bird1 <- bird |> 
+  dplyr::select(-R)
 
-bird |>
-  pomp(times="year", t0=1872,
-       rprocess=euler(step, delta.t=1/52),
-       rinit=rinit,
-       rmeasure=rmeas,
-       dmeasure=dmeas,
-       statenames=statenames,
-       paramnames=paramnames,
-       obs_names <- c("logCPUE"),
-       covarnames <- c("R")
-    ) -> mod
+bird1 |>
+  pomp(
+    times="year", 
+    t0=1871,
+    rprocess=euler(step, delta.t=1/52),
+    rinit=rinit,
+    rmeasure=rmeas,
+    dmeasure=dmeas,
+    statenames=statenames,
+    paramnames=paramnames,
+    obs_names <- c("logCPUE"),
+    covar = covariate_table(
+      bird |> dplyr::select(year, R) |> 
+        dplyr::bind_rows(c("year" = 1871, R = 0)) |> 
+        dplyr::arrange(year), 
+      times = 'year',
+      order = "constant"
+    ),
+    partrans = parameter_trans(
+      log = c('sigmaF', 'sigmaB', 'alpha', 'sigma_obs', 'a', 'gamma', 'Beta', 'b',
+              'c', 'logF_0', 'logB_0', 'logRho')
+    )
+    # covarnames <- c("R")
+  ) -> mod
+```
 
+```{r}
+param_guess <- c(
+  logF_0 = 1, 
+  logB_0 = 1,
+  a = 1,
+  b = 2, 
+  c = 1,
+  alpha = 1, 
+  Beta = 1,
+  gamma = 0.5,
+  sigmaF = 0.1, 
+  sigmaB = 0.1, 
+  logRho = 3, 
+  sigma_obs = 0.1
+)
+```
+
+```{r}
+mif2(
+  mod, 
+  Np = 1000, 
+  Nmif = 50, 
+  rw.sd = rw_sd(
+    alpha = 0.02, Beta = 0.02, gamma = 0.02, 
+    a = 0.02, b = 0.02, c = 0.02, 
+    sigma_obs = 0.02, logF_0 = ivp(0.1), logB_0 = ivp(0.1), 
+    sigmaF = 0.02, sigmaB = 0.02, logRho = 0.02
+  ),
+  cooling.fraction.50 = 0.5,
+  params = param_guess
+) -> mif2_out
 ```
 
 
-- `rinit`: simulator for the initial-state distribution, i.e., the distribution of the latent state at time $t_0$
+```{r}
+freeze(
+  runif_design(
+    lower = c(alpha = 0, Beta = 0, gamma = 0, a = 0, b = 0, c = 0,
+              sigma_obs = 0, logF_0 = ivp(0.1), logB_0 = ivp(0.1),
+              sigmaF = 0, sigmaB = 0.02, logRho = 0)
+    upper = c(alpha = 0, Beta = 0, gamma = 0, a = 0, b = 0, c = 0,
+              sigma_obs = 0, logF_0 = ivp(0.1), logB_0 = ivp(0.1),
+              sigmaF = 0, sigmaB = 0.02, logRho = 0)
+  ),
+  seed = 420
+) -> guesses
+```
+
+
+### Global Search
 
 --------
 
