@@ -16,37 +16,15 @@ output:
 
 # Introduction
 
-Studying ecology, especially animal population dynamics, is essential for understanding the complex interactions between species and their environment, guiding conservation efforts, and ensuring the sustainable use of natural resources for future generations.. By modeling population dynamics, researchers and scientists can understand how animals respond to environmental changes and human activities. This helps conservation efforts by identifying threatened species and develop strategies to protect biodiversity. Moreover, animal populations can serve as reservoirs for infectious diseases that can affect both human and animal health. Having a robust understanding of population movement can help predict disease outbreaks, understand transmission patterns, and improve disease control and prevention.
+Studying population dynamics is essential for understanding the complex interactions between species and their environment. By modeling population dynamics, researchers can gain an understanding of how animals respond to environmental changes and activities. This understanding is vital for conservation efforts as it aids in identifying endangered species and devising strategies to safeguard biodiversity. Furthermore, animal populations can act as reservoirs for infectious diseases, impacting both human and animal health. By comprehensively understanding population movements, scientists can predict outbreaks, discern transmission patterns, and enhance disease control and prevention measures.
 
-This report extends previous research investigating the long-term population decline of willow ptarmigan *Lagopus lagopus*. 
-
-- The alternative prey hypothesis predicts that the interaction between generalist predators and their main prey is a major driver of population dynamics of alternative prey species.
-
-- Grouse species are of the most studied
-
-- In this report, we analyze 142 years of data to investigate whether the population growth of a declining alternative prey species, the willow ptarmigan, is related to an interaction between red foxes and their main prey, small rodents.
-
-Two types of questions we can ask.
-
-- Scientific goals: Which explanations are most favored by the data? Which kinds of data are most informative?
-- Applied goals: how to design ecological or epidemiological intervention? How to make accurate forecasts?
-
-
-This report seeks to answer two scientific questions. First, between alternative prey hypothesis and the role of climate change, which explanation is most favored by the data? Secondly, which kind of data is more informative?
-
+This report extends research by Hjeljord and Loe, who explain the dwindling numbers of willow ptarmigan Lapagog lapagos in Northeastern Scandinavia (). Although not in immediate danger, the willow ptarmigan faces threats from habitat loss, climate change, and hunting and trapping. Hjeljord and Loe postulate that, along with climate, a long-term dampening of the amplitude in small rodents and an increase in red fox numbers, have prevented willow ptarmigan populations from reaching their peaks seen a hundred years ago (). Their analysis implements linear models with a count proxy as a function of time to estimate linear change and wavelet analysis to detect cyclic periods. This report’s aim is to further Hjelford and Loe’s work by capturing the stochastic population dynamics and the role of alternative prey using the partially observed markov process (POMP) framework
 
 ## Related Work
 
-In ecological studies, researching predator-prey dynamics, especially within the context of the alternative prey hypothesis, offers profound understanding into ecosystem complexities. Focusing on ptarmigans in Norway, a number of studies have attempted to model the interplay between ptarmigans as prey and their predators, including gyrfalcons and foxes. Notably, research by Aanes et al. (2002) highlighted the significant impact of predation pressure on ptarmigan populations, emphasizing the need to understand predator-prey dynamics for effective conservation strategies.
+Surprisingly, grouse, the family of birds which willow ptarmigan belong to, are of the most studied bird species in the world. Thus, an abundance of scientific research has been carried out to shed light on the decline in its population. @pedersen found that intensified forestry practices have significantly reduced suitable breeding habitat. Additionally, agricultural expansion has led to the conversion of tundra and heathland habitats, further diminishing ptarmigan populations [@henden]. Climate change exacerbates these effects by altering snow cover patterns, impacting the ptarmigans' ability to camouflage and increasing predation risk. Research by @tottrup highlighted that warmer temperatures and reduced snow cover are leading to increased predation pressure on ptarmigans in Scandinavia. Furthermore, hunting pressure has also played a role in the decline of ptarmigan populations. Studies by @hebbelstrup and @storass documented the impact of hunting on ptarmigan populations in Norway and Sweden, respectively.  Breisjøberget el al., found that red foxes negatively affect ptarmigan when small rodent abundance is low, which is in accordance with the alternative prey hypothesis.
 
-## Objectives
-
-Our research objectives are as follow:
-
-- 
-- There has been a lack in application of the Partially Observed Markov Process (POMP) framework to ecological research questions.
-
-The remainder of the report is structured as follows. We briefly introduce and describe our data set and variables of interest. Following that, a short exploration of data trend, correlation, and association is is given. Next, we build a baseline ARMA process model to serve as a measurement for our more complex proposals. We then introduce the pomp framework and present our model along with a section on model diagnostics. We conclude with the results, a discussion, and a summary with suggestions of future extensions. 
+The remainder of the report is structured as follows. We briefly introduce and describe our data set and variables of interest. Followed by a short exploration of trend, correlation, and association. Next, we build a baseline ARMA process model to serve as a measurement for our more complex proposals. We then introduce the pomp framework and present our model along with a section on model diagnostics. We conclude with the results, a discussion, and a summary with suggestions of future extensions. 
 
 ## Data
 
@@ -282,8 +260,6 @@ param_guess <- c(
 bird <- data[subset]
 head(bird)
 ```
-
-
 
 ```{r, eval=FALSE}
 Csnippet("
