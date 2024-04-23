@@ -1,157 +1,94 @@
----
-title: "Investigating the alternative prey hypothesis with the POMP framework"
-author: "Pete, Sizhuang, and Heyuan"
-date: "`r Sys.Date()`"
-csl: https://raw.githubusercontent.com/citation-style-language/styles/master/cell-numeric.csl
-output: 
-  bookdown::html_document2:
-    theme: cosmo
-    toc: yes
-    toc_float:
-      collapsed: true
----
 
-![Female Willow Ptarmigan captured by [Bryce W. Robinson](https://ornithologi.com/2015/06/30/in-context-mid-summer-willow-ptarmigan-behavior-and-appearance/).](./assets/ptarmigan.jpg)
-
-# Introduction
-
-Studying ecology, especially animal population dynamics, is essential for understanding the complex interactions between species and their environment, guiding conservation efforts, and ensuring the sustainable use of natural resources for future generations.. By modeling population dynamics, researchers and scientists can understand how animals respond to environmental changes and human activities. This helps conservation efforts by identifying threatened species and develop strategies to protect biodiversity. Moreover, animal populations can serve as reservoirs for infectious diseases that can affect both human and animal health. Having a robust understanding of population movement can help predict disease outbreaks, understand transmission patterns, and improve disease control and prevention.
-
-This report extends previous research investigating the long-term population decline of willow ptarmigan *Lagopus lagopus*. 
-
-- The alternative prey hypothesis predicts that the interaction between generalist predators and their main prey is a major driver of population dynamics of alternative prey species.
-
-- Grouse species are of the most studied
-
-- In this report, we analyzed 142 years of data to investigate whether the population growth of a declining alternative prey species, the willow ptarmigan, is related to an interaction between red foxes and their main prey, small rodents.
-
-## Related Work
-
-## Data
-
-Our data includes 142 observations of CPUE from 1872 to 2012. The harvest data was recorded by hunters in the Southeastern mountain regions of Norway. The data is provided by the authors of the study and is hosted by Dryad [here](). A description of the dataset provided by the authors is given below: 
-
-- **year**: Self explanatory
-- **CPUE**: Catch per unit effort, expressed as a number of birds shot per hunter per year.
-- **log.CPUE**: Logarithm transformation of CPUE
-- **peak_rodent_year**: Peak rodent year is scored as “yes”, otherwise “no”. Occurrence of peak
-rodent years were extracted from four sources: 1871-1949 (Wildhagen 1952), 1932-1971
-(Myrberget 1982a), 1971-1979 (Christiansen 1983), 1981-1985 (Frafjord 1988), 1986- 1989
-(Selås et al. 2013), and 1990-2013 (Framstad 2017). Note that 1980 is missing as we were
-not able to find an estimate for this year.
-
-# Data Analysis
-
-```{r libraries, echo=FALSE, message=FALSE}
-library(readxl)
-library(ggplot2)
-library(knitr)
-library(forecast)
-library(dplyr)
-library(cowplot)
+```{r}
+library(tidyverse)
+library(tseries)
+#install.packages("ggfortify")
+library(ggfortify)
 library(pomp)
 ```
 
 
-```{r data_table, echo=FALSE}
-data <- read_excel("../data/bird_data.xlsx")
-data |>
-  rename(peak_rodent_year = "peak rodent year") -> data
 
-data[data == "NA"] <- NA
-clean_data <- na.omit(data)
+#### read in the data & data description
+```{r}
+data_path <- '//Users/sizhuang/Desktop/GitHubRepos/pomp_final/data/data.txt'
+df <- read.table(data_path, header = TRUE, sep = "\t", na.strings = "NA", dec = ".", strip.white = TRUE)
+head(df)
 
-# knitr::kable(clean_data[1:5, 1:6], caption = "Cleaned Data")
 ```
+
+142 years (1872-2013) of willow ptarmigan hunting records in southeastern Norway
+
+CPUE: the number of birds shot per hunter per day, as the primary metric for assessing population changes.
+
+NAO: A positive NAO index favors mild winters in the U.S. East. Negative values favor stronger cold-air outbreaks and increased storminess in the eastern U.S.
+
+temp.PREINC: temperature, pre-incubation, 5/1 - 6/2
+temp.INC: temperature, incubation, 6/3 - 6/24
+temp.BROOD: temperature, brooding & rearing, 6/25 - 7/15
+temp.HATCH: temperature, mean hatching date, 7/21 - 7/27
+prefix prec.: precipitation
+
+opening data hunt(julian day): the starting day of hunting season is named as Julian Day, which is varied across 142 years. It is mainly in mid to late August up to the 1920's and 10th/15th September in later years. 
+
+
+# Data Analysis
+
+#### Trend Analysis
+Temporal Patterns: CPUE showed significant declines from early records to recent years, with notable shifts in population cycles and their amplitude.
+
+Impact of Alternative Prey: The availability of rodents, which serve as alternative prey for predators that also hunt ptarmigan, was strongly linked to fluctuations in ptarmigan numbers. Years with high rodent populations typically saw higher CPUE for ptarmigan, suggesting lower predatory pressure on them.
+
+#### Correlation
+For the ACF plot, the initial 40 lags show a strong correlation with past values, diminishing quickly after first 5 lags. It suggests $q = 5$, $q = 40$ or any value smaller than 40 appropriate for MA(q) component. For the PACF plot, partial correlation dies out quickly after 5 lags. It would be appropriate to select $p = 0$ or $p = 5$ for AR(p) component.
+
+Given the long-range significance in the ACF, I may be dealing with a non-stationary series that needs differencing. Also this plot with a flip to negative autocorrelations and a cyclical pattern that declines over time is a characteristic sign of seasonality in my data. However, STL or classical decomposition fails because time series has no or less than 2 periods, indicating the non-existence of seasonality. So the repeated short-term cycle in 5 lags could be explained by the partial correlation.  
+
+
+```{r, error=TRUE}
+start_year <- min(df$year)
+end_year <- max(df$year)
+frequency <- 1  
+ts_cpue <- ts(df$log.CPUE, start=start_year, end=end_year, frequency=frequency)
+
+# Apply STL decomposition
+ts_components <- stl(ts_cpue, s.window = "periodic")
+plot(ts_components)
+```
+
+
+#### Stationary Check
+ARMA(p,q) is performed only if time series data is stationary. So, I will do the stationarity check by ADF.
 
 ```{r}
-columns_to_convert <- c("growth rate CPUE", "temp.PREINC", "temp.INC", "temp.HATCH", "temp.BROOD", "temp.WINTER", "temp.SPRING", "prec.PREINC", "prec.INC", "prec.HATCH", "prec.BROOD")
-# Convert these columns to numeric
-clean_data[columns_to_convert] <- lapply(clean_data[columns_to_convert], as.numeric)
-
-# Check for any remaining NAs
-# sapply(clean_data[columns_to_convert], function(x) sum(is.na(x)))
+# Kwiatkowski-Phillips-Schmidt-Shin (KPSS) test
+kpss_result <- kpss.test(ts_cpue, null = "Level")
+print(kpss_result)
 ```
 
+From ADF test, p-value is estimated as 0.01, smaller than 0.05. We have enough evidence to reject the null hypothesis that the time series is non-stationary. 
+
+KPSS with p-value = 0.01 suggests that the log CPUE times series data is non-stationary. This means I can't fit the data with ARMA(p,q) without differencing to achieve stationarity.
+
+
+#### Differencing
 ```{r}
-# Summary statistics for all numerical variables
-summary(clean_data)
-
+# Differencing the time series once
+ts_diff <- diff(ts_cpue, differences = 1)
+print(kpss.test(ts_diff,null = "Level"))
 ```
 
-```{r, echo=FALSE, message=FALSE}
-# Most basic bubble plot
-p1 <- ggplot(clean_data, aes(x=year, y=CPUE)) +
-  geom_line(color="steelblue") + 
-  geom_point() + 
-  geom_rect(
-    data = subset(clean_data, peak_rodent_year == 'yes'),
-            aes(xmin = year - 0.5, xmax = year + 0.5, ymin = -Inf, ymax = Inf),
-            fill = "blue", alpha = 0.3
-    ) + 
-  theme_light() +
-  xlab("") + 
-  stat_smooth(
-    color = "#FC4E07",
-    method = "loess"
-  )
-
-p2 <- ggplot(clean_data, aes(x=year, y=log.CPUE)) + 
-  geom_line(color="steelblue") + 
-  geom_point() + 
-  geom_rect(
-    data = subset(clean_data, peak_rodent_year == 'yes'),
-            aes(xmin = year - 0.5, xmax = year + 0.5, ymin = -Inf, ymax = Inf),
-            fill = "blue", alpha = 0.3
-    ) + 
-  theme_light() + 
-  xlab("Year") + 
-  stat_smooth(
-    color = "#FC4E07",
-    method = "loess"
-  )
-
-plot_grid(
-  p1, p2,
-  labels = "AUTO", 
-  ncol = 1
-)
-```
-
-Looking at both *CPUE* and *log.CPUE* in [figure], it's evident that ptarmigan populations has steadily decreased over the 142 year-long period. The blue shaded regions highlight years when peak rodent year is "yes." Notice how both plots exhibit peaks in the shaded regions and troughs otherwise, which is exactly what we expected to see from the alternative prey hypothesis. It's also worth noting that this trend is far less apparent beyond the early 1900s. 
-
-In accordance with the previous study, our analysis will use *log.CPUE* to reduce heteroscedasticity.
+KPSS with p-value = 0.1 suggests that the first-order differenced times series data is stationary. This means I can fit this differenced data with ARMA(p,q).
 
 
-```{r ACF, echo=FALSE}
-acf(clean_data$log.CPUE, lag = 100, main = "ACF log.CPUE")
-```
-
-```{r PACF, echo=FALSE}
-pacf(clean_data$log.CPUE, lag = 100, main = "PACF log.CPUE")
-```
-
-
-
-
-```{r}
-# Box plot of CPUE for each Peak Rodent Year
-ggplot(data, aes(x = peak_rodent_year, y = CPUE, fill = peak_rodent_year)) +
-  geom_boxplot() +
-  labs(title = "CPUE by Peak Rodent Year", x = "Peak Rodent Year", y = "CPUE")
-```
-
---------
 
 # Methods
 
-## ARMA Baseline
+## ARMA
+From ADF test, p-value is estimated as 0.01, smaller than 0.05. We have enough evidence to reject the null hypothesis that the time series is non-stationary. KPSS also support the same conclusion that this times series data is stationary. Thus, we could conclude that CPUE on log scale is stationary. This means I can fit the data with ARMA(p,q) without the need to difference or other ways of data transformation to achieve stationarity.
 
-We will start off by fitting a simple ARMA model with parameters chosen using the algorithmic approach, grid search. This simple model will serve as a reference against which the performance of the more advanced POMP model is measured. Essentially, the ARMA model will serve as a yardstick for managing expectations. Of the models shown in (table #), we select the one with the Akaike’s information criterion (AIC). AIC is essentially “minus twice the maximized log likelihood plus twice the number of parameters [cite],” and is defined by:
+```{r}
 
-$$AIC=-2\times\ell(\theta^*)+2D$$
-
-```{r grid_search, echo=FALSE, warning=FALSE}
 aic_table <- function(data,P,Q){
   table <- matrix(NA,(P+1),(Q+1))
   for(p in 0:P) {
@@ -164,37 +101,290 @@ aic_table <- function(data,P,Q){
   table
 }
 
-bird_aic_table <- aic_table(data$log.CPUE,4,5)
+bird_aic_table <- aic_table(ts_diff,5,10)
+require(knitr)
+kable(bird_aic_table,digits=2)
+
+```
+
+The smaller AIC, the better the model to fit the data. Thus, ARMA(0,5) with the lowest AIC value of 204.48 is the best model. 
+
+
+```{r}
+aic_table <- function(data,P,Q){
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      table[p+1,q+1] <- arima(data,order=c(p,1,q))$aic
+    }
+  }
+  dimnames(table) <- list(paste("AR",0:P, sep=""),
+    paste("MA",0:Q,sep=""))
+  table
+}
+
+bird_aic_table <- aic_table(ts_cpue,5,10)
 require(knitr)
 kable(bird_aic_table,digits=2)
 ```
 
+ARIMA(0,1,5) achieves the same result for original log CPUE data.
 
-## Partially Observed Markov Process
+ARMA(0,5) Diagnosis
+```{r}
+fit1 <- arima(ts_cpue, order=c(0,0,5))
+residuals <- residuals(fit1)
 
-Partially observed Markov process models, also known as state-space models, hidden Markov models, and stochastic dynamical system models "consist of an unobserved Markov state process, connected to the data via an explicit model of the observation process." The former is referred to as the *latent process model* and the latter as the *measurement model.*
+# ACF check
+acf(residuals, main="ACF of Residuals")
 
-![Conditional independence graph of POMP from A. King's Notes](./assets/state_space.png)
+# Normality check with Q-Q plot
+qqnorm(residuals)
+qqline(residuals, col="red")
 
-### Ricker Model
+# Shapiro-Wilk test
+shapiro.test(residuals)
+
+# Root Check
+ma_coefficients <- coef(fit1)[grepl("ma", names(coef(fit1)))]
+MA_roots <- polyroot(c(1, ma_coefficients))
+#invertible <- all(Mod(MA_roots) > 1)
+#print(paste("Is the model invertible? ", invertible))
+
+autoplot(fit1) +
+  ggtitle("ARMA(0, 5)")
+```
+
+For the ACF plot of the residuals, all autocorrelations are within the confidence bounds (indicated by blue dashed lines), which suggests that there is no significant autocorrelation present. Additionally, the QQ plot shows that the data points roughly align with the reference line (colored red), supporting the assumption of normality. This is further confirmed by a Shapiro-Wilk test for normality, which returns a p-value of 0.62, indicating that the residuals can be considered normally distributed. Moreover, the roots of the characteristic polynomial are outside the unit circle, confirming that the MA(5) process is invertible—a critical condition for model adequacy. These diagnostics collectively verify that the ARIMA(0,1,5) model is well-specified and adheres to the necessary assumptions for valid time series analysis.
+
+
+
+
+
+
+## POMP 3
+
+### Model Overview
+Our model involves two processes: the observed bird count $Y(t)$ and the unobserved state process $X(t)$. The observed bird count at time $t$ is modeled by a negative binomial distribution:
+$$y_t = NB(mean = \rho B_t, \sigma),$$ where $B_t$ is the bird population size at time $t$ and $\rho$ is a scaling factor. The unobserved state process $X(t)$ consists several state variables, including:
+* $F_t$: the number of red foxes at time $t$.
+* $R_t$: indicator variable on whether year $r$ is a peak rodent year ($R_t=1$ if year $t$ is a peak rodent year, zero otherwise).
+* Other environmental factors such as temperature, precipitation and the North Atlantic Oscillation (NAO) index.
+
+Reference: Lotka-Volterra predator-prey model for the state process: $$X_{t+dt} = \beta X_t - \mu X_t$$
+
+### Dynamics of Bird and Fox Populations
+The bird population evolves according to the difference equation:
+$$B_{t+dt} = \alpha B_t - \beta(R_t) B_{t}F_{t},$$
+where:
+* $\alpha$ is the natural grow rate of the bird population.
+* $\beta(R_t)$ is the predating rate, modulated by rodents in the following way
+$$\beta(R_t) =  \gamma^{R_t} \beta_1,$$
+where:
+* $\beta_1$ is the base predating rate for non peak rodent years.
+* $\gamma$ is a scaling factor, taking rodent availability into consideration.
+
+The fox population dynamics can be described as:
+$$ F_{t+dt} = \delta(t) F_t B^*_t - \theta(t) F_t$$
+
+where:
++ $\delta(t)$ is the birth rate parameter, modulating by rodents through
+$$\delta(t) = \phi^{R_t} \delta_1,$$
+where $\delta_1$ is the base fox birth rate on non peak rodent years and $\phi$ is a scaling factor for peak rodent years. We impose a restriction $\phi<1$ so that in peak rodent years, birth rates of foxes decrease.
++ $B^*_t$: 
++ $\theta(t)$ represents death rates if foxes, which could depend on environmental factors such as temperature, NAO etc.
+
+### Numerical Approximation 
+We use Euler Approximation to approximate the predator (fox) population at time $t+ \Delta t$.
+$$F_{t+\Delta t} = F_t + \delta(t) F_t B_t \Delta t - \theta(t) F_t \Delta t$$
+or equivalently,
+$$F_{t+\Delta t} = F_t + (\phi^{R_t} \delta_1 F_t B_t - \theta(t) F_t) \Delta t$$
+
+where $\delta(t) F_t B_t \delta t$ is the expected number of new predators arising from the Poisson process with rate $\delta(t) F_t B_t$ and $- \theta F_t \delta t$ is the deterministic decrease in predators due to natural death over the time step $\Delta t$.
+
+
+$$B_{t+ \Delta t} = B_t + \alpha B_t \Delta t - \beta(R_t) B_t F_t\Delta t$$
+or equivalently,
+$$B_{t+ \Delta t} = B_t + (\alpha B_t - \gamma^{R_t} \beta B_t F_t) \Delta t$$
+
+
+
 
 ```{r}
+# compute the average temperature and preciptation. 
+data_frame <- df[,c(1,3,6,7,8:17)]
+data_frame$Temp <- rowMeans(data_frame[,c(5:10)], na.rm = TRUE) 
+data_frame$Precip <- rowMeans(data_frame[,c(11:14)], na.rm = TRUE) 
+data_frame <- data_frame[,c(1,2,3,4,15,16)]
+names(data_frame) <- c('year', 'CUPE', 'R', 'NAO', 'Temp', 'Precip')
+data_frame$R <- ifelse(data_frame$R == "yes", 1, 0)
+data_frame <- transform(data_frame, year = as.numeric(year))  # Ensure 'year' is numeric
 
 ```
 
 
---------
 
-## Diagnostics
+```{r, warning=FALSE}
+meas <- dplyr::select(data_frame, year, reports=CUPE, R) 
 
---------
 
-# Results 
 
---------
+sir_step<- Csnippet("
+  double rateBin, rateBout, rateFin, rateFout; 
+  
+  rateBin = alpha * B * dt;
+  rateBout = pow(gamma, R) * beta_1 * B * Fox * dt;
+  rateFin = pow(psi, R) * delta_1 * Fox * B * dt;
+  rateFout = theta * Fox * dt;
+  
+  // double dF = rbinom(Fox, 1 - exp(-rateF));
+  double dFin = rbinom(Fox, 1 - exp(-rateFin));
+  double dFout = rbinom(Fox, 1 - exp(-rateFout));
+  
+  double dBin = rbinom(B, 1 - exp(-rateBin));
+  double dBout = rbinom(B, 1 - exp(-rateBout));
 
-# Conclusion
+  Fox += dFin - dFout;  
+  B += dBin - dBout;
+  B = fmax(B, 0.0); 
+  Fox = fmax(Fox, 0.0);
+  // Rprintf(\"B = %f\\n\\n \", B);
+ 
+")
 
---------
 
-# References
+# dmeasure: Define the measurement model
+sir_dmeas <- Csnippet("
+  if (give_log) {
+    if (B == 0 & reports != 0) {
+      lik = -100000;
+    } else {
+      // Rprintf(\"rho * B = %f\\n \", rho * B);
+      // Rprintf(\"reports = %f\\n\\n \", reports);
+      lik = dnbinom_mu(reports, k, rho * B, give_log);
+    }
+  } else {
+    lik = dnbinom_mu(reports, k, rho * B, give_log);
+  }
+")
+
+# rmeasure: 
+sir_rmeas <- Csnippet("
+  reports = rnbinom_mu(k, rho * B);
+")
+## size =  number of successes until the experiment is stopped; success rate / hunting rate: 
+
+# initialize:
+sir_rinit <- Csnippet("
+  Fox = nearbyint(F_0);
+  B = nearbyint(B_0);
+")
+
+
+# Define parameters and initial states
+params <- c(alpha = 0.5, beta_1 = 0.0001, gamma = 1, delta_1 = 0.01, psi = 3, theta = 0.1, rho = 0.01, k = 20, F_0 = 90, B_0 = 1000)
+
+my_covars <- covariate_table(meas |> dplyr::select(R, year) |> as.data.frame(), times = 'year', order = 'constant')
+
+# create a pomp object
+pomp(data = meas |> dplyr::select(-R) |> as.data.frame(),
+     rprocess=euler(sir_step,delta.t=1/12), times='year', t0=1871,
+    rinit=sir_rinit,
+    rmeasure=sir_rmeas,
+    dmeasure=sir_dmeas,
+    statenames=c("Fox","B"),
+    paramnames=c("alpha", "gamma", "delta_1", 'beta_1', "psi", "theta", "rho" ,'k', 'F_0', 'B_0'),
+    covar = my_covars,
+    partrans = parameter_trans(log = c('alpha', 'gamma', 'delta_1', 'beta_1', 'psi', 'theta', 'rho', 'k', 'F_0', 'B_0'))
+  ) -> measSIR
+
+
+
+measSIR |>
+  pfilter(Np=5, params = params) -> pf
+
+mif2(
+  measSIR, 
+  Nmif = 10, 
+  Np = 2000,
+  cooling.fraction.50 = 0.5, 
+  rw.sd = rw_sd(
+    alpha = 0.02, beta_1 = 0.02, gamma = 0.00, delta_1 = 0.02, psi = 0.02, rho = 0.02, k = 0.02, F_0 = ivp(0.1), B_0 = ivp(0.1), theta = 0.02
+  ),
+  params = params
+) -> mif_out
+
+```
+
+
+
+```{r}
+statenames <- c('logF', 'logB')
+paramnames <- c('a', 'b', 'c', 'gamma', 'alpha', 'Beta', 'sigmaF', 'sigmaB',
+                'logF_0', 'logB_0', 'logRho', 'sigma_obs')
+obs_names <- c('logCPUE')
+# logF_0 = 0 normalizing to assume unit initial population
+# sigmaF roughly the noise in a year
+param_guess <- c(
+  logF_0 = 0,
+  logB_0 = 0,
+  a = 1,
+  b = 2,
+  c = 1,
+  alpha = 1,
+  Beta = 1,
+  gamma = 0.5,
+  sigmaF = 0.1,
+  sigmaB = 0.1,
+  logRho = 3,
+  sigma_obs = 0.1
+)
+Csnippet('
+  double dwB, dwF;
+  dwF = rgammawn(sigmaF, dt);
+  dwB = rgammawn(sigmaB, dt);
+  logF += (b*R + c*exp(logB)*(1-gamma*R)-a)*dwF;
+  logB += (alpha - Beta*exp(logF)*(1-gamma*R))*dwB;
+') -> rproc
+Csnippet('
+  logF = logF_0;
+  logB = logB_0;
+') -> rinit
+Csnippet('
+  log.CPUE = rnorm(logB + logrho, signma_obs);
+') -> rmeas
+Csnippet('
+  lik = dnorm(logCPUE, logB + logrho, sigma_obs, give_log);
+') -> dmeas
+
+my_covars <- covariate_table(meas |> dplyr::select(R, year) |> as.data.frame(), times = 'year', order = 'constant')
+
+
+pomp(data = data_frame |> dplyr::select(-R),rprocess=euler(rproc,delta.t=1/12),
+     times = 'year', t0 = 1871,
+    rinit=rinit,
+    # rmeasure=rmeas,
+    # dmeasure=dmeas,
+    statenames=statenames,
+    paramnames=paramnames,
+    covar = my_covars
+  ) -> measSIR
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
