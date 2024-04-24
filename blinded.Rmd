@@ -1,9 +1,8 @@
 ---
 title: "Investigating the alternative prey hypothesis with the POMP framework"
-author: "Blinded"
 date: "`r Sys.Date()`"
 csl: https://raw.githubusercontent.com/citation-style-language/styles/master/cell-numeric.csl
-bibliography: references.bib 
+bibliography: /Users/ruojunliu/Desktop/references.bib 
 output: 
   bookdown::html_document2:
     code_folding: hide
@@ -13,7 +12,7 @@ output:
       collapsed: true
 ---
 
-![Female Willow Ptarmigan captured by [Bryce W. Robinson](https://ornithologi.com/2015/06/30/in-context-mid-summer-willow-ptarmigan-behavior-and-appearance/).](./assets/ptarmigan.jpg)
+![Female Willow Ptarmigan captured by [Bryce W. Robinson](https://ornithologi.com/2015/06/30/in-context-mid-summer-willow-ptarmigan-behavior-and-appearance/).](/Users/ruojunliu/Desktop/STATS 531 - Time Series/pomp_final/assets/ptarmigan.jpg)
 
 # Introduction
 
@@ -47,7 +46,6 @@ library(forecast)
 library(dplyr)
 library(cowplot)
 library(pomp)
-plan(multisession)
 library(doParallel)
 library(doRNG)
 library(foreach)
@@ -56,7 +54,7 @@ library(doFuture)
 
 
 ```{r data_table, echo=FALSE}
-df <- read_excel("./data/bird_data.xlsx")
+df <- read_excel("/Users/ruojunliu/Desktop/STATS 531 - Time Series/pomp_final/data/bird_data.xlsx")
 df |>
   rename(R = "peak rodent year") |>
   rename(NAO = "NAO May_Jun_Jul") |>
@@ -167,15 +165,16 @@ $$AIC=-2\times\ell(\theta^*)+2D$$
 
 ARMA model can't be performed on the non-stationary time series data. The KPSS test is implemented for a stationarity check.
 ```{r stationary, echo=FALSE}
+start_year <- min(data$year)
+end_year <- max(data$year)
+frequency <- 1  
+ts_cpue <- ts(data$logCPUE, start=start_year, end=end_year, frequency=frequency)
+
 # Kwiatkowski-Phillips-Schmidt-Shin (KPSS) test
 kpss_result <- tseries::kpss.test(ts_cpue, null = "Level")
 print(kpss_result)
 
 # Differencing the time series once
-start_year <- min(data$year)
-end_year <- max(data$year)
-frequency <- 1  
-ts_cpue <- ts(data$logCPUE, start=start_year, end=end_year, frequency=frequency)
 ts_diff <- diff(ts_cpue, differences = 1)
 print(tseries::kpss.test(ts_diff,null = "Level"))
 ```
@@ -232,7 +231,7 @@ Partially observed Markov process models, also known as state-space models, hidd
 
 We propose modeling the pomp framework using a variation of the Lotka–Volterra equations [@lotka]. The Lotka-Voltera equations, also referred to as the predator-prey equations, are a pair of first order nonlinear differential equations. They are frequently used to describe the dynamics of biological systems in which two species interact, one as a predator and the other as prey. Our analysis focuses on a slightly different approach that introduces the idea of an *alternative prey.* The alternative prey hypothesis supposes that predators supported by a primary species will shift to consume alternative prey during a decrease in primary prey abundance. Despite this occurring in many systems, the mechanisms are poorly understood [@brunet], and so we offer an avenue to explore by introducing the pomp framework. 
 
-![Conditional independence graph of POMP from A. King's Notes](./assets/state_space.png)
+![Conditional independence graph of POMP from A. King's Notes](/Users/ruojunliu/Desktop/STATS 531 - Time Series/pomp_final/assets/state_space.png)
 
 The measurement model $Y(t)$ is our ptarmigan count proxy, *logCPUE*, $y(t) =Negative\ Binomial(mean=\rho\beta_t, \sigma)$, and the process model $X(t)$ includes predator (fox) population density, preferred (rodent) prey population density, and alternative prey (bird) population density. We model how the log of the populations of foxes and ptarmigans change through time in Equations \@ref(eq:fox) and \@ref(eq:bird).                                                                                    
 
@@ -373,7 +372,7 @@ The effective sample size (ESS) in the second panel of Figure \@ref(fig:pf1) dis
 
 A single execution of the `mif2` function applied to model provides a snapshot of the model's behavior under a specific set of initial conditions.
 
-```{r, echo=FALSE, eval=FALSE}
+```{r, echo=FALSE}
 mif2(
   mod, 
   Np = 1000, 
@@ -388,7 +387,6 @@ mif2(
   params = param_guess
 ) -> mif2_out
 
-
 foreach (
   i=1:10,
   .combine=c,
@@ -400,7 +398,7 @@ logLik(pf) -> ll
 print(logmeanexp(ll,se=TRUE))
 ```
 
-The estimated log-likelihood is -205 with standard error of 3.14.
+The estimated log-likelihood is **-205** with standard error of 3.14.
 
 Iterated Filtering (IF2) is implemented by a `foreach` loop which iterates 20 times, and in each iteration of the loop the IF2 function is applied to our model. This is a good way to explore the variability in outcomes due to initial conditions and other stochastic elements of the modeling process as well as to control the robustness. The variation in trajectories across the iterations suggests that the algorithm is exploring the parameter space and adjusting the estimates as it receives more information from the data.
 
@@ -452,6 +450,8 @@ bake(file="lik_local.rds",{
   results
 }) -> results_local
 
+pairs(~loglik+a+alpha+b+Beta+c+gamma+logB_0+logF_0+logRho+sigmaB+sigmaF,data=results_local,pch=16)
+
 bind_rows(results_local) |> arrange(-loglik) |> write_csv("bird_params.csv")
 
 if (file.exists("CLUSTER.R")) {
@@ -460,23 +460,25 @@ if (file.exists("CLUSTER.R")) {
 ```
 
 
-It estimated log likelihood of -134 which is larger than a single execution of `mif2` function, but with a larger standard error of 8.2.
-![Model parameters over iterations](./assets/local_search_1.png)
+It estimated log likelihood of **-134** which is larger than a single execution of `mif2` function, but with a larger standard error of 8.2.
+![Model parameters over iterations](/Users/ruojunliu/Desktop/STATS 531 - Time Series/pomp_final/assets/local_search_1.png)
+
 From the above plot, the likelihood over iterations quickly rises and then levels off. Towards the later iterations, the changes in parameter estimates become smaller, indicating that the search for the maximum likelihood is flattening out. This can be a sign that the search is approaching a local maximum, but the fact that the changes are small but not zero implies that there might still be some uncertainty. But not all parameters show signs of convergence, such as $log(B_0), \sigma_F$.
 
 We find that the higher likelihood is usually associated with lower values of $\alpha, \gamma, log(\rho), \sigma_{obs}$. $log(F_0), log(B_0)$, the initial conditions for Fox population and birds population in log scale, shows a general upward trend over iterations. $a, b, c, \sigma_F, \sigma_B$ shows a general flat trend near zero except for a few iterations with a dramatically increasing trend. 
 
-```{r}
-pairs(~loglik+a+alpha+b+Beta+c+gamma+logB_0+logF_0+logRho+sigmaB+sigmaF,data=results_local,pch=16)
+```{r, echo=FALSE, eval=FALSE}
+#pairs(~loglik+a+alpha+b+Beta+c+gamma+logB_0+logF_0+logRho+sigmaB+sigmaF,data=results_local,pch=16)
 ```
 
-![](./assets/local_search_2.png)
+![](/Users/ruojunliu/Desktop/STATS 531 - Time Series/pomp_final/assets/local_search_2.png)
+
 A scattered or cloud-like pattern indicates little to no apparent linear correlation.
 
 
 ### Global Search
 
-```{r}
+```{r, echo=FALSE, eval=FALSE}
 set.seed(2062379496)
 
 runif_design(
@@ -523,8 +525,8 @@ bind_rows(results) |>
 ```
 
 
-```{r, echo=FALSE}
-results <- read.csv('/Users/ruojunliu/Desktop/bird_params_small.csv')
+```{r, echo=FALSE, eval=FALSE}
+results <- read.csv('/Users/ruojunliu/Desktop/bird_params_middle.csv')
 print(paste('The maximum likelihood from global search for our model is', max(results$loglik), 
             'with a standard error of ', results$loglik.se[which.max(results$loglik)]))
       
@@ -533,10 +535,11 @@ best_parameters <- results[best_index, ]
 print(paste('The best parameters are:', toString(best_parameters)))
 ```
 
-The best estimated log likelihood under global search by the use of GreatLakes is -320.4, which is a lot lower than the log likelihood from ARIMA (log-likelihood with -99) and local search(log-likelihood with -134). It is opposite to our expectation. One of the reasons is that we limit the parameter space to save the running time on Great Lakes, otherwise it will take more than 8 hours to run given the fact that our model is built with a large number of parameters. The accuracy will be increased if we increase the parameter space. 
+The best estimated log likelihood under global search by the use of GreatLakes is -176.3, which is a lower than the log likelihood from ARIMA (log-likelihood with -99) and local search(log-likelihood with -134). It is opposite to our expectation. One of the reasons is that we limit the parameter space to save the running time on Great Lakes, otherwise it will take more than 8 hours to run given the fact that our model is built with a large number of parameters. The accuracy will be increased if we increase the parameter space. 
 
 
-As a result, he log-likelihood produced an ARIMA(0,1,5) model is better than that from a local search of a POMP model, it implies that the ARMA model is fitting the data better according to this metric
+As a result, he log-likelihood produced an ARIMA(0,1,5) model is better than that from a local search of a POMP model, it implies that the ARMA model is fitting the data better according to this metric.
+
 
 # Conclusion
 
@@ -545,8 +548,5 @@ Our report probes the potential of applying POMP to the field of ecological popu
 
 --------
 
-# Contribution
-The contribution is not included in order to be blinded.
---------
 
 # References
