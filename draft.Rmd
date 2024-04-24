@@ -207,7 +207,7 @@ if (!is.na(logLik(arma_model))) {
 
 ## Partially Observed Markov Process
 
-Partially observed Markov process models, also known as state-space models, hidden Markov models, and stochastic dynamical system models are probabilistic models used to describe the evolution of a system over time when some of the system's variables are "hidden" or unobservable. It consists of two main components: a latent *process model*, representing the unobservable states of the system, and a *measurement model*, linking the latent states to the observed data. By incorporating both observed and unobserved variables, POMP models allow researchers to make inferences about the underlying dynamics of the system. A simple visual representation of the process is depicted in the image below.
+Partially observed Markov process models, also known as state-space models, hidden Markov models, and stochastic dynamical system models are probabilistic models used to describe the evolution of a system over time when some of the system's variables are "hidden" or unobservable [@ch10]. It consists of two main components: a latent *process model*, representing the unobservable states of the system, and a *measurement model*, linking the latent states to the observed data [@start]. By incorporating both observed and unobserved variables, POMP models allow researchers to make inferences about the underlying dynamics of the system. A simple visual representation of the process is depicted in the image below.
 
 We propose modeling the pomp framework using a variation of the Lotka–Volterra equations [@lotka]. The Lotka-Voltera equations, also referred to as the predator-prey equations, are a pair of first order nonlinear differential equations. They are frequently used to describe the dynamics of biological systems in which two species interact, one as a predator and the other as prey. Our analysis focuses on a slightly different approach that introduces the idea of an *alternative prey.* The alternative prey hypothesis supposes that predators supported by a primary species will shift to consume alternative prey during a decrease in primary prey abundance. Despite this occurring in many systems, the mechanisms are poorly understood [@brunet], and so we offer an avenue to explore by introducing the pomp framework. 
 
@@ -295,7 +295,7 @@ Csnippet("
 ") -> dmeas
 ```
 
-```{r, echo=FALSE}
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
 bird1 <- bird |> 
   dplyr::select(-R)
 
@@ -349,8 +349,6 @@ plot(pf)
 
 The effective sample size (ESS) in the second panel of Figure \@ref(fig:pf1) displays a presence of occasional spikes interspersed with predominantly low values. It suggests a particle degeneracy issue. In other words, only a few samples are providing meaningful information, which lead to a less robust and a less reliable estimate. The third panel shows the conditional log-likelihood over time which is a measure of how well the model with its current parameters. The log-likelihood appears to be fluctuating and showing some periods of higher values interspersed with periods of significant decline, indicating varying model performance over time. We can conclude that our initial guess of parameter values is poor and we will do a local search of parameters for a more stable model performance. 
 
-A single execution of the `mif2` function applied to model provides a snapshot of the model's behavior under a specific set of initial conditions.
-
 ```{r, echo=FALSE, eval=FALSE}
 mif2(
   mod, 
@@ -367,7 +365,7 @@ mif2(
 ) -> mif2_out
 ```
 
-Iterated Filtering (IF2) is implemented by a `foreach` loop which iterates 20 times, and in each iteration of the loop the IF2 function is applied to our model. This is a good way to explore the variability in outcomes due to initial conditions and other stochastic elements of the modeling process as well as to control the robustness. The variation in trajectories across the iterations suggests that the algorithm is exploring the parameter space and adjusting the estimates as it receives more information from the data.
+A single execution of the `mif2` function applied to model provides a snapshot of the model's behavior under a specific set of initial conditions. Iterated Filtering (IF2) is implemented by a `foreach` loop which iterates 20 times, and in each iteration of the loop the IF2 function is applied to our model. This is a good way to explore the variability in outcomes due to initial conditions and other stochastic elements of the modeling process as well as to control the robustness. The variation in trajectories across the iterations suggests that the algorithm is exploring the parameter space and adjusting the estimates as it receives more information from the data.
 
 ```{r, echo=FALSE, eval=FALSE}
 bake(file="local_search.rds", {
@@ -422,9 +420,64 @@ if (file.exists("CLUSTER.R")) {
 }
 ```
 
+```{r, message=FALSE}
+# bake(file="local_search.rds", {
+#   foreach(i=1:20,.combine=c,
+#     .options.future=list(seed=482947940)
+#   ) %dofuture% {
+#     mod |>
+#       mif2(
+#         Np=1000, Nmif=50,
+#         cooling.fraction.50=0.5,
+#         rw.sd = rw_sd(
+#            alpha = 0.02, Beta = 0.02, gamma = 0.02,
+#            a = 0.02, b = 0.02, c = 0.02,
+#           sigma_obs = 0.02, logF_0 = ivp(0.1), logB_0 = ivp(0.1),
+#          sigmaF = 0.02, sigmaB = 0.02, logRho = 0.02
+#         ),
+#         partrans = parameter_trans(
+#              log = c('sigmaF', 'sigmaB', 'alpha', 'sigma_obs', 'a', 'gamma', 'Beta', 'b',
+#               'c', 'logF_0', 'logB_0', 'logRho')),
+#         paramnames=c("a", "b", "c", "gamma", "alpha", "Beta", "sigmaF", "sigmaB",
+#                 "logF_0", "logB_0", "logRho", "sigma_obs"),
+#         params = param_guess
+#       )
+#   }}) -> mifs_local
+
+mifs_local |>
+  traces() |>
+  melt() |>
+  ggplot(aes(x=iteration,y=value,group=.L1,color=factor(.L1)))+
+  geom_line()+
+  guides(color="none")+
+  facet_wrap(~name,scales="free_y")
+```
+
+
 The likelihood over iterations quickly rises and then levels off. Towards the later iterations, the changes in parameter estimates become smaller, indicating that the search for the maximum likelihood is flattening out. This can be a sign that the search is approaching a local maximum, but the fact that the changes are small but not zero implies that there might still be some uncertainty. But not all parameters show signs of convergence, such as $log(B_0), \sigma_F$.
 
 We find that the higher likelihood is usually associated with lower values of $\alpha, \gamma, log(\rho), \sigma_{obs}$. $log(F_0), log(B_0)$, the initial conditions for Fox population and birds population in log scale, shows a general upward trend over iterations. $a, b, c, \sigma_F, \sigma_B$ shows a general flat trend near zero except for a few iterations with a dramatically increasing trend. 
+
+```{r}
+# bake(file="lik_local.rds",{
+#   foreach(mf=mifs_local,.combine=rbind,
+#     .options.future=list(seed=900242057)
+#   ) %dofuture% {
+#     evals <- replicate(10, logLik(pfilter(mf,Np=100)))
+#     ll <- logmeanexp(evals,se=TRUE)
+#     mf |> coef() |> bind_rows() |>
+#       bind_cols(loglik=ll[1],loglik.se=ll[2])
+#   } -> results
+#   attr(results,"ncpu") <- nbrOfWorkers()
+#   results
+# }) -> results_local
+# bind_rows(results_local) |> arrange(-loglik) |> write_csv("bird_params.csv")
+# if (file.exists("CLUSTER.R")) {
+#   source("CLUSTER.R")
+# }
+pairs(~loglik+a+alpha+b+Beta+c+gamma+logB_0+logF_0+logRho+sigmaB+sigmaF,data=results_local,pch=16)
+```
+
 
 ### Global Search
 
