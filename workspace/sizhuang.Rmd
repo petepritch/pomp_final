@@ -377,7 +377,62 @@ pomp(data = data_frame |> dplyr::select(-R),rprocess=euler(rproc,delta.t=1/12),
 
 
 
+```{r}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
 
+# Load data
+data <- read.csv("/Users/sizhuang/Desktop/bird_params_small.csv")
+
+# Reshape data to long format
+data_long <- data %>%
+  pivot_longer(
+    cols = -c(loglik, loglik.se), # Exclude loglik and loglik.se from reshaping
+    names_to = "variable",
+    values_to = "value"
+  )
+
+# Calculate the threshold for the red line
+threshold <- max(data$loglik) - 0.5 * qchisq(p = 0.95, df = 1)
+
+# Define the number of variables per plot
+vars_per_plot <- 5  # Adjust this as needed to fit your specific requirements
+total_vars <- length(unique(data_long$variable))
+total_plots <- ceiling(total_vars / vars_per_plot)
+
+# Create and display/save multiple plots
+plots <- list()
+for (i in 1:total_plots) {
+  subset_vars <- unique(data_long$variable)[((i-1) * vars_per_plot + 1):(i * vars_per_plot)]
+  subset_data <- data_long %>% filter(variable %in% subset_vars)
+  
+  # Adjusted for more columns to expand vertical space
+  ncol_facet = min(3, length(subset_vars))  # Use 3 columns or less based on available variables
+  nrow_facet = ceiling(length(subset_vars) / ncol_facet)  # Calculate number of rows based on number of columns
+
+  plots[[i]] <- ggplot(subset_data, aes(x = value, y = loglik)) +
+    geom_point(alpha = 0.3) +
+    geom_hline(yintercept = threshold, color = "red", linetype = "dashed", size = 1) +
+    facet_wrap(~ variable, scales = "free_x", ncol = ncol_facet, nrow = nrow_facet) +
+    labs(title = paste("Variables vs Loglik - Plot", i),
+         x = "Value",
+         y = "Loglik") +
+    theme_minimal() +
+    theme(strip.text.x = element_text(size = 12, face = "bold"),
+          legend.position = "none",
+          axis.title.y = element_text(size = 14),
+          axis.title.x = element_text(size = 14),
+          panel.spacing = unit(1.5, "lines"))
+
+  # Display or save plots
+  print(plots[[i]])
+  # Optionally save each plot
+  # ggsave(paste("Plot_", i, ".png", sep = ""), plot, width = 20, height = 8 * nrow_facet, units = "in")
+}
+
+
+```
 
 
 

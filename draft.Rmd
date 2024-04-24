@@ -47,6 +47,7 @@ library(forecast)
 library(dplyr)
 library(cowplot)
 library(pomp)
+plan(multisession)
 library(doParallel)
 library(doRNG)
 library(foreach)
@@ -133,11 +134,6 @@ ggplot(data, aes(x = factor(R), y = logCPUE, group = factor(R))) +
 
 Looking at both *CPUE* and *log.CPUE* in Figure \@ref(fig:trend), it's evident that ptarmigan populations has steadily decreased over the 142 year-long period. The blue shaded regions in plot **C** highlight years when peak rodent year is equal to 1 signifying *yes*. Notice how both plots exhibit peaks in the shaded regions and troughs otherwise, which is exactly what we expected to see from the alternative prey hypothesis. It's also worth noting that this trend is far less apparent beyond the early 1900s. Figure \@ref(fig:boxplot) displays side-by-side boxplots of *logCPUE* vs. *peak rodent year*, confirming that ptarmigan counts are generally higher in years of rodent abundance. **Note:** in accordance with the previous study, our analysis will use *log.CPUE* to reduce heteroscedasticity.
 
-Figure \@ref(fig:acf) depicts the ACF plot of *log.CPUE* at 100 lags. The plot reinforces what we already know - the time series is not stationary, or that future values of the time series are correlated with past values. More specifically, the initial 40 lags show strong correlation with the strongest being the first 5. The PACF plot in Figure \@ref(fig:trend), the partial correlation dies out after 5 lags. For an ARMA model, it may be appropriate to select an $AR(p=5)$ component. 
-
-Given the long-range significance in the ACF plot and obvious non-stationarity, differencing the series may be necessary to fit a simple time series model to the data. Moreover, the ACF appears to be approaching a seasonal behavior, however we cannot apply STL or classical decomposition procedures as our sample of data has less than 2 periods. The repeated short-term cycle in 5 lags could be explained by the partial correlation. That being said, the purpose of this report is to explore the pomp framework, thus we elect to use a very simple ARMA process to serve as a basis for our more sophisticated models.  
-
-
 
 ## Correlation {.tabset}
 
@@ -154,6 +150,11 @@ pacf(data$logCPUE, lag = 100, main = "PACF log.CPUE")
 
 ## {-}
 
+Figure \@ref(fig:acf) depicts the ACF plot of *log.CPUE* at 100 lags. The plot reinforces what we already know - the time series is not stationary, or that future values of the time series are correlated with past values. More specifically, the initial 40 lags show strong correlation with the strongest being the first 5. The PACF plot in Figure \@ref(fig:trend), the partial correlation dies out after 5 lags. For an ARMA model, it may be appropriate to select an $AR(p=5)$ component. 
+
+Given the long-range significance in the ACF plot and obvious non-stationarity, differencing the series may be necessary to fit a simple time series model to the data. Moreover, the ACF appears to be approaching a seasonal behavior, however we cannot apply STL or classical decomposition procedures as our sample of data has less than 2 periods. The repeated short-term cycle in 5 lags could be explained by the partial correlation. That being said, the purpose of this report is to explore the pomp framework, thus we elect to use a very simple ARMA process to serve as a basis for our more sophisticated models.  
+
+
 --------
 
 # Methods
@@ -164,7 +165,22 @@ We will start off by fitting a simple ARMA model with parameters chosen using th
 
 $$AIC=-2\times\ell(\theta^*)+2D$$
 
-We choose the ARMA(3,2), as out simple benchmark model. The corresponding log-likelihood value comes out to be **-105.93**.
+ARMA model can't be performed on the non-stationary time series data. The KPSS test is implemented for a stationarity check.
+```{r stationary, echo=FALSE}
+# Kwiatkowski-Phillips-Schmidt-Shin (KPSS) test
+kpss_result <- tseries::kpss.test(ts_cpue, null = "Level")
+print(kpss_result)
+
+# Differencing the time series once
+start_year <- min(data$year)
+end_year <- max(data$year)
+frequency <- 1  
+ts_cpue <- ts(data$logCPUE, start=start_year, end=end_year, frequency=frequency)
+ts_diff <- diff(ts_cpue, differences = 1)
+print(tseries::kpss.test(ts_diff,null = "Level"))
+```
+
+KPSS with p-value = 0.01 suggests that the average daily hunting of birds(CPUE) in log scale is non-stationary. However, first-order difference on this time series data is stationary, proved by the p-value larger than $\alpha=0.05$ from KPSS test. Then the following ARMA(p,q) model will be run on such differenced data.
 
 ```{r grid,echo=FALSE, warning=FALSE}
 aic_table <- function(data,P,Q){
@@ -179,16 +195,19 @@ aic_table <- function(data,P,Q){
   table
 }
 
-bird_aic_table <- aic_table(data$logCPUE,4,5)
+bird_aic_table <- aic_table(ts_diff,4,5)
 require(knitr)
 kable(bird_aic_table,digits=2,caption = "AIC Table.")
 ```
+
+The best ARMA(0,5) is selected given the lowest AIC with 204.48 to fit first-order differenced data. Thus, ARIMA(0,1,5) will be run below to check for its log-likelihood.
+
 
 ```{r, eval=FALSE, echo=FALSE}
 library(forecast)
 
 bird_ts <- ts(bird$logCPUE)
-arma_model <- Arima(bird_ts, order = c(3, 0, 2))
+arma_model <- Arima(bird_ts, order = c(0, 1, 5))
 
 # Compute log-likelihood
 log_likelihood <- logLik(arma_model)
@@ -202,6 +221,8 @@ if (!is.na(logLik(arma_model))) {
   print(summary(arma_model))
 }
 ```
+
+We choose the ARIMA(0,1,5), as out simple benchmark model. The corresponding log-likelihood value comes out to be **-99.32**.
 
 
 
@@ -349,6 +370,9 @@ plot(pf)
 
 The effective sample size (ESS) in the second panel of Figure \@ref(fig:pf1) displays a presence of occasional spikes interspersed with predominantly low values. It suggests a particle degeneracy issue. In other words, only a few samples are providing meaningful information, which lead to a less robust and a less reliable estimate. The third panel shows the conditional log-likelihood over time which is a measure of how well the model with its current parameters. The log-likelihood appears to be fluctuating and showing some periods of higher values interspersed with periods of significant decline, indicating varying model performance over time. We can conclude that our initial guess of parameter values is poor and we will do a local search of parameters for a more stable model performance. 
 
+
+A single execution of the `mif2` function applied to model provides a snapshot of the model's behavior under a specific set of initial conditions.
+
 ```{r, echo=FALSE, eval=FALSE}
 mif2(
   mod, 
@@ -363,13 +387,26 @@ mif2(
   cooling.fraction.50 = 0.5,
   params = param_guess
 ) -> mif2_out
+
+
+foreach (
+  i=1:10,
+  .combine=c,
+  .options.future=list(seed=652643293)
+) %dofuture% {
+  mif2_out |> pfilter(Np=5)
+} -> pf
+logLik(pf) -> ll
+print(logmeanexp(ll,se=TRUE))
 ```
 
-A single execution of the `mif2` function applied to model provides a snapshot of the model's behavior under a specific set of initial conditions. Iterated Filtering (IF2) is implemented by a `foreach` loop which iterates 20 times, and in each iteration of the loop the IF2 function is applied to our model. This is a good way to explore the variability in outcomes due to initial conditions and other stochastic elements of the modeling process as well as to control the robustness. The variation in trajectories across the iterations suggests that the algorithm is exploring the parameter space and adjusting the estimates as it receives more information from the data.
+The estimated log-likelihood is -205 with standard error of 3.14.
+
+Iterated Filtering (IF2) is implemented by a `foreach` loop which iterates 20 times, and in each iteration of the loop the IF2 function is applied to our model. This is a good way to explore the variability in outcomes due to initial conditions and other stochastic elements of the modeling process as well as to control the robustness. The variation in trajectories across the iterations suggests that the algorithm is exploring the parameter space and adjusting the estimates as it receives more information from the data.
 
 ```{r, echo=FALSE, eval=FALSE}
 bake(file="local_search.rds", {
-  foreach(i=1,.combine=c,
+  foreach(i=1:20,.combine=c,
     .options.future=list(seed=482947940)
   ) %dofuture% {
     mod |>
@@ -391,6 +428,8 @@ bake(file="local_search.rds", {
       )
   }}) -> mifs_local
 
+logLik(mifs_local) -> ll
+print(logmeanexp(ll,se=TRUE))
 
 mifs_local |>
   traces() |>
@@ -420,87 +459,98 @@ if (file.exists("CLUSTER.R")) {
 }
 ```
 
-```{r, message=FALSE}
-# bake(file="local_search.rds", {
-#   foreach(i=1:20,.combine=c,
-#     .options.future=list(seed=482947940)
-#   ) %dofuture% {
-#     mod |>
-#       mif2(
-#         Np=1000, Nmif=50,
-#         cooling.fraction.50=0.5,
-#         rw.sd = rw_sd(
-#            alpha = 0.02, Beta = 0.02, gamma = 0.02,
-#            a = 0.02, b = 0.02, c = 0.02,
-#           sigma_obs = 0.02, logF_0 = ivp(0.1), logB_0 = ivp(0.1),
-#          sigmaF = 0.02, sigmaB = 0.02, logRho = 0.02
-#         ),
-#         partrans = parameter_trans(
-#              log = c('sigmaF', 'sigmaB', 'alpha', 'sigma_obs', 'a', 'gamma', 'Beta', 'b',
-#               'c', 'logF_0', 'logB_0', 'logRho')),
-#         paramnames=c("a", "b", "c", "gamma", "alpha", "Beta", "sigmaF", "sigmaB",
-#                 "logF_0", "logB_0", "logRho", "sigma_obs"),
-#         params = param_guess
-#       )
-#   }}) -> mifs_local
 
-mifs_local |>
-  traces() |>
-  melt() |>
-  ggplot(aes(x=iteration,y=value,group=.L1,color=factor(.L1)))+
-  geom_line()+
-  guides(color="none")+
-  facet_wrap(~name,scales="free_y")
-```
-
-
-The likelihood over iterations quickly rises and then levels off. Towards the later iterations, the changes in parameter estimates become smaller, indicating that the search for the maximum likelihood is flattening out. This can be a sign that the search is approaching a local maximum, but the fact that the changes are small but not zero implies that there might still be some uncertainty. But not all parameters show signs of convergence, such as $log(B_0), \sigma_F$.
+It estimated log likelihood of -134 which is larger than a single execution of `mif2` function, but with a larger standard error of 8.2.
+![Model parameters over iterations](./assets/local_search_1.png)
+From the above plot, the likelihood over iterations quickly rises and then levels off. Towards the later iterations, the changes in parameter estimates become smaller, indicating that the search for the maximum likelihood is flattening out. This can be a sign that the search is approaching a local maximum, but the fact that the changes are small but not zero implies that there might still be some uncertainty. But not all parameters show signs of convergence, such as $log(B_0), \sigma_F$.
 
 We find that the higher likelihood is usually associated with lower values of $\alpha, \gamma, log(\rho), \sigma_{obs}$. $log(F_0), log(B_0)$, the initial conditions for Fox population and birds population in log scale, shows a general upward trend over iterations. $a, b, c, \sigma_F, \sigma_B$ shows a general flat trend near zero except for a few iterations with a dramatically increasing trend. 
 
 ```{r}
-# bake(file="lik_local.rds",{
-#   foreach(mf=mifs_local,.combine=rbind,
-#     .options.future=list(seed=900242057)
-#   ) %dofuture% {
-#     evals <- replicate(10, logLik(pfilter(mf,Np=100)))
-#     ll <- logmeanexp(evals,se=TRUE)
-#     mf |> coef() |> bind_rows() |>
-#       bind_cols(loglik=ll[1],loglik.se=ll[2])
-#   } -> results
-#   attr(results,"ncpu") <- nbrOfWorkers()
-#   results
-# }) -> results_local
-# bind_rows(results_local) |> arrange(-loglik) |> write_csv("bird_params.csv")
-# if (file.exists("CLUSTER.R")) {
-#   source("CLUSTER.R")
-# }
 pairs(~loglik+a+alpha+b+Beta+c+gamma+logB_0+logF_0+logRho+sigmaB+sigmaF,data=results_local,pch=16)
 ```
+
+![](./assets/local_search_2.png)
+A scattered or cloud-like pattern indicates little to no apparent linear correlation.
 
 
 ### Global Search
 
---------
+```{r}
+set.seed(2062379496)
 
-# Results 
+runif_design(
+  lower = c(alpha = 0, Beta = 0, gamma = 0, a = 7, b = 2, c = 0.5,
+              sigma_obs = 0, logF_0 = 0.4, logB_0 = 1.6,
+              sigmaF = 0, sigmaB = 0.02, logRho = 0.3),
+    upper = c(alpha = 0.1, Beta = 0.1, gamma = 0.1, a = 8, b = 3, c = 1,
+              sigma_obs = 1, logF_0 = 0.5, logB_0 = 1.7,
+              sigmaF = 0.1, sigmaB = 0.04, logRho = 0.5),
+    nseq=50
+) -> guesses
 
---------
+
+mf1 <- mifs_local[[1]]
+fixed_params <- coef(mif2_out) 
+
+
+bake(file="global_search_middle2.rds",
+  dependson=guesses,{
+    foreach(guess=iter(guesses,"row"), .combine=rbind,
+      .options.future=list(seed=1270401374)
+    ) %dofuture% {
+      mf1 |>
+        mif2(params=c(guess,fixed_params)) |>
+        mif2(Nmif=100) -> mf
+      replicate(
+        10,
+        mf |> pfilter(Np=500) |> logLik()
+      ) |>
+        logmeanexp(se=TRUE) -> ll
+      mf |> coef() |> bind_rows() |>
+        bind_cols(loglik=ll[1],loglik.se=ll[2])
+    } -> results
+    attr(results,"ncpu") <- nbrOfWorkers()
+    results
+  }) |>
+  filter(is.finite(loglik)) -> results
+
+bind_rows(results) |>
+  filter(is.finite(loglik)) |>
+  arrange(-loglik) |>
+  write_csv("bird_params_middle2.csv")
+
+```
+
+
+```{r, echo=FALSE}
+results <- read.csv('/Users/ruojunliu/Desktop/bird_params_middle.csv')
+print(paste('The maximum likelihood from global search for our model is', max(results$loglik), 
+            'with a standard error of ', results$loglik.se[which.max(results$loglik)]))
+      
+best_index <- which.max(results$loglik)
+best_parameters <- results[best_index, ]
+print(paste('The best parameters are:', toString(best_parameters)))
+```
+
+The best estimated log likelihood under global search by the use of GreatLakes is -176.3, which is a lower than the log likelihood from ARIMA (log-likelihood with -99) and local search(log-likelihood with -134). It is opposite to our expectation. One of the reasons is that we limit the parameter space to save the running time on Great Lakes, otherwise it will take more than 8 hours to run given the fact that our model is built with a large number of parameters. The accuracy will be increased if we increase the parameter space. 
+
+
+As a result, he log-likelihood produced an ARIMA(0,1,5) model is better than that from a local search of a POMP model, it implies that the ARMA model is fitting the data better according to this metric
 
 # Conclusion
 
-Our report probes the potential of applying POMP to the field of ecological population dynamics. We began with the establishment of a foundational ARMA model to serve as a reference point against which we evaluated our proposed POMP models. Drawing inspiration from the Lotka-Voltera equations, we introduce our take on the concept of an alternative prey hypothesis. Although our analysis is on the side of preliminary, it shows this approach can shed more light on the dynamic responses of ecosystems to changes in prey abundance.
-
+Our report probes the potential of applying POMP to the field of ecological population dynamics. It ends with ARIMA(0,1,5) produces the highest log-likelihood with **-99**.  We began with the establishment of a foundational ARMA model to serve as a reference point against which we evaluated our proposed POMP models. Drawing inspiration from the Lotka-Voltera equations, we introduce our take on the concept of an alternative prey hypothesis. Although our analysis is on the side of preliminary, it shows this approach can shed more light on the dynamic responses of ecosystems to changes in prey abundance.
 
 
 --------
 
 # Contribution
 
-- Pete: Proposed the research topic and found data set. Wrote introduction, related, work, exploratory data analysis sections. 
-- Heyuan: 
-- Sizhuang: 
-
+- Pete: Proposed the research topic and found data set. Wrote introduction, related work, exploratory data analysis sections, ARMA. 
+- Heyuan: Wrote the interpretation of result, refine the ARIMA, do the POMP, local search and global search. 
+- Sizhuang: Helped with POMP, local search and global search and created visualizations of some of the POMP results
+Professor and GSI helped us a lot in building POMP model.
 --------
 
 # References
