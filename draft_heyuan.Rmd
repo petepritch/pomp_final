@@ -132,7 +132,7 @@ ggplot(data, aes(x = factor(R), y = logCPUE, group = factor(R))) +
 
 ## {-}
 
-Looking at both *CPUE* and *log.CPUE* plot above, it's evident that ptarmigan populations has steadily decreased over the 142 year-long period. The blue shaded regions in plot **C** highlight years when peak rodent year is equal to "yes." Notice how both plots exhibit peaks in the shaded regions and troughs otherwise, which is exactly what we expected to see from the alternative prey hypothesis. It's also worth noting that this trend is far less apparent beyond the early 1900s. 
+Looking at both *CPUE* and *log.CPUE* plot above with decreasing number of hunting yield, it's evident that ptarmigan populations has steadily decreased over the 142 year-long period. The blue shaded regions in plot **C** highlight years when peak rodent year is equal to "yes." Notice how both plots exhibit peaks in the shaded regions and troughs otherwise, which is exactly what we expected to see from the alternative prey hypothesis. It's also worth noting that this trend is far less apparent beyond the early 1900s. 
 
 In accordance with the previous study, our analysis will use *log.CPUE* to reduce heteroscedasticity.
 
@@ -291,6 +291,16 @@ head(bird)
 ```
 
 
+$$F_{t+dt} = bR + ce^{logB}* (1-\gamma R)-a + F_{t}$$
+
+$$B_{t+dt} = \alpha - \beta e^{logF} *(1-\gamma R) + B_t$$
+
+$logF_0$ and $logB_0$ are fox population and bird population in log scale in the initial time 0. 
+$R$ is a binary variable with 0(no) or 1(yes), indicating whether this year is a peak rodent year or not.
+$F_{dt}(dF)$ can be generated from the gamma distribution with $\sigma_F$ and a timestep $dt$. $B_{dt}(dB)$ can be generated from the gamma distribution with $\sigma_B$ and a timestep $dt$.
+Our observation log CPUE follows the normal distribution with mean $logB - log(\rho)$ and standard deviation $\sigma_{obs}$.
+We will use the stochastic Euler's Approximation method to built our POMP model by Csnippet.
+
 ```{r}
 Csnippet("
   double dwF, dwB;
@@ -372,7 +382,7 @@ mod |>
 plot(pf)
 ```
 
-The effective sample size (ESS) in the second panel displays a presence of occasional spikes interspersed with predominantly low values. It suggests that only a few samples are providing meaningful information, which lead to a less robust and a less reliable estimate. The third panel shows the conditional log-likelihood over time which is a measure of how well the model with its current parameters. The log-likelihood appears to be fluctuating and showing some periods of higher values interspersed with periods of significant decline, indicating varying model performance over time. 
+The effective sample size (ESS) in the second panel displays a presence of occasional spikes interspersed with predominantly low values. It suggests a particle degeneracy issue. In other words, only a few samples are providing meaningful information, which lead to a less robust and a less reliable estimate. The third panel shows the conditional log-likelihood over time which is a measure of how well the model with its current parameters. The log-likelihood appears to be fluctuating and showing some periods of higher values interspersed with periods of significant decline, indicating varying model performance over time. 
 
 Thus, our initial guess of parameter values is poor and we will do a local search of parameters for a more stablized model performance. 
 
@@ -399,7 +409,7 @@ plot(mif2_out)
 
 
 
-We used a foreach loop which iterates 20 times, each iteration of the loop applies the mif2 function to our model. This is a good way to explore the variability in outcomes due to initial conditions and other stochastic elements of the modeling process as well as control the robustness.
+Iterated Filtering (IF2) is implemented by a foreach loop which iterates 20 times, and each iteration of the loop applies the IF2 function to our model. This is a good way to explore the variability in outcomes due to initial conditions and other stochastic elements of the modeling process as well as control the robustness. The variation in trajectories across the iterations suggests that the algorithm is exploring the parameter space and adjusting the estimates as it receives more information from the data.
 
 ```{r}
 foreach(i=1:20,.combine=c,
@@ -434,19 +444,10 @@ mifs_local |>
 ```
 
 
+The likelihood over iterations quickly rises and then levels off. Towards the later iterations, the changes in parameter estimates become smaller, indicating that the search for the maximum likelihood is flattening out. This can be a sign that the search is approaching a local maximum, but the fact that the changes are small but not zero implies that there might still be some uncertainty. But not all parameters show signs of convergence, such as $log(B_0), \sigma_F$.
 
+I find that the higher likelihood is usually associated with lower values of $\alpha, \gamma, log(\rho), \sigma_{obs}$. $log(F_0), log(B_0)$, the initial conditions for Fox population and birds population in log scale, shows a general upward trend over iterations. $a, b, c, \sigma_F, \sigma_B$ shows a general flat trend near zero except for a few iterations with a dramatically increasing trend. 
 
-```{r}
-foreach(mf=mifs_local,.combine=rbind,
-  .options.future=list(seed=900242057)
-) %dofuture% {
-   evals <- replicate(10, logLik(pfilter(mf,Np=500))) 
-   ll <- logmeanexp(evals,se=TRUE) 
-   mf |> coef() |> bind_rows() |>
-   bind_cols(loglik=ll[1],loglik.se=ll[2]) } -> results
-
-pairs(~loglik+a+alpha+b+Beta+c+gamma+logB_0+logF_0+logRho+sigmaB+sigmaF,data=results,pch=16)
-```
 
 
 
@@ -506,7 +507,46 @@ filter(is.finite(loglik)) -> results
 ```
 
 
+```{r, echo=FALSE}
+print(paste('The maximum likelihood from global search for our model is', results$loglik, 
+            'with a standard error of ', results$loglik.se[which.max(results$loglik)]))
+      
+best_index <- which.max(results$loglik)
+best_parameters <- results[best_index, ]
+print(paste('The best parameters are:', toString(best_parameters), 'for beta, rho, eta, mu_EI, mu_IR,'))
+```
+
+
 ## Diagnostics
+
+#### ARMA
+
+```{r}
+fit1 <- arima(ts_cpue, order=c(0,0,5))
+residuals <- residuals(fit1)
+
+# ACF check
+acf(residuals, main="ACF of Residuals")
+
+# Normality check with Q-Q plot
+qqnorm(residuals)
+qqline(residuals, col="red")
+
+# Shapiro-Wilk test
+shapiro.test(residuals)
+
+# Root Check
+ma_coefficients <- coef(fit1)[grepl("ma", names(coef(fit1)))]
+MA_roots <- polyroot(c(1, ma_coefficients))
+#invertible <- all(Mod(MA_roots) > 1)
+#print(paste("Is the model invertible? ", invertible))
+
+autoplot(fit1) +
+  ggtitle("ARMA(0, 5)")
+```
+
+For the ACF plot of the residuals, all autocorrelations are within the confidence bounds (indicated by blue dashed lines), which suggests that there is no significant autocorrelation present. Additionally, the QQ plot shows that the data points roughly align with the reference line (colored red), supporting the assumption of normality. This is further confirmed by a Shapiro-Wilk test for normality, which returns a p-value of 0.62, indicating that the residuals can be considered normally distributed. Moreover, the roots of the characteristic polynomial are outside the unit circle, confirming that the MA(5) process is invertible — a critical condition for model adequacy. These diagnostics collectively verify that the ARIMA(1,1,5) model is well-specified and adheres to the necessary assumptions for valid time series analysis.
+
 
 --------
 
